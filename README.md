@@ -1,68 +1,19 @@
-# LLM Collaboration with Multi-Agent Reinforcement Learning
+# LLM Collaboration with MARL
 
-This directory contains training scripts and configurations for paper _"LLM Collaboration with Multi-Agent Reinforcement Learning"_.
+This repository contains training scripts and configurations for paper _"LLM Collaboration with Multi-Agent Reinforcement Learning"_.
 
-## Directory
+## Experiments
 
-```
-experiments/
-├── train_grpo.py           # Single-agent GRPO training
-├── train_magrpo.py         # Multi-agent MAGRPO training
-├── train_mt_magrpo.py      # Multi-turn MAGRPO training
-├── config_loader.py        # Configuration utility
-└── configs/               # YAML configuration files
-    ├── grpo_*.yaml        # Single-agent configs
-    ├── magrpo_*.yaml      # Multi-agent configs
-    └── magrpo_mt_*.yaml   # Multi-turn configs
-```
-
-## Training Scripts
-
-### 1. **train_grpo.py** - Single-Agent Training
-Trains a single model using GRPO (Group Relative Policy Optimization) on various datasets.
-
-### 2. **train_magrpo.py** - Multi-Agent Training
-Trains multiple collaborative agents using MAGRPO on various datasets.
-
-### 3. **train_mt_magrpo.py** - Multi-Turn Multi-Agent Training
-Trains multiple agents with multi-turn interactions and expert feedback.
-
-## Supported Datasets
-
-All scripts support the following datasets:
+- **TLDR**: Reddit post summarization
+- **arXiv**: Scientific abstract expansion
 - **HumanEval**: Code generation benchmark
 - **CoopHumanEval**: Cooperative code generation
-- **ArXiv**: Scientific abstract expansion
-- **TLDR**: Reddit post summarization
-
-## Configuration Files
-
-### Naming Convention
-- `grpo_*` - Single-agent configurations
-- `magrpo_*` - Multi-agent configurations  
-- `magrpo_mt_*` - Multi-turn multi-agent configurations
-
-### Available Configurations
-
-#### Single-Agent (GRPO)
-- `grpo_he_config.yaml` - HumanEval single-agent
-- `grpo_che_config.yaml` - CoopHumanEval single-agent
-- `grpo_arxiv_config.yaml` - ArXiv single-agent
-- `grpo_tldr_config.yaml` - TLDR single-agent
-
-#### Multi-Agent (MAGRPO)
-- `magrpo_he_config.yaml` - HumanEval multi-agent
-- `magrpo_che_config.yaml` - CoopHumanEval multi-agent
-- `magrpo_arxiv_config.yaml` - ArXiv multi-agent
-- `magrpo_tldr_config.yaml` - TLDR multi-agent
-
-#### Multi-Turn (MT-MAGRPO)
-- `magrpo_mt_he_config.yaml` - Multi-turn HumanEval
-- `magrpo_mt_che_config.yaml` - Multi-turn CoopHumanEval
 
 ## Usage
 
-### Basic Training
+### Training by Default
+
+You can run the training scripts with default configurations as follows:
 
 ```bash
 # Single-agent HumanEval
