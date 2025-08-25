@@ -1,0 +1,494 @@
+[
+    {
+        "task_id": "CoopHumanEval/0",
+        "prompt": "def x_or_y(n, x, y):\n    '''A simple program which should return the value of x if n is \n    a prime number and should return the value of y otherwise.\n\nFor example:\n>>> x_or_y(7, 34, 12)\n34\n>>> x_or_y(15, 8, 5)\n5\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(7, 34, 12) == 34\n    assert candidate(15, 8, 5) == 5\n    assert candidate(2, 10, 20) == 10\n    assert candidate(1, 100, 200) == 200\n    assert candidate(13, 1, 2) == 1",
+        "entry_point": "x_or_y"
+    },
+    {
+        "task_id": "CoopHumanEval/1",
+        "prompt": "def will_it_fly(q,w):\n    '''Write a function that returns True if the object q will fly, and False otherwise.\n    The object q will fly if it's balanced (it is a palindromic list) and the sum of its elements is less than or equal the maximum possible weight w.\n\nFor example:\n>>> will_it_fly([1, 2], 5)\nFalse\n# 1+2 is less than the maximum possible weight, but it's unbalanced.\n\n>>> will_it_fly([3, 2, 3], 1)\nFalse\n# it's balanced, but 3+2+3 is more than the maximum possible weight.\n\n>>> will_it_fly([3, 2, 3], 9)\nTrue\n# 3+2+3 is less than the maximum possible weight, and it's balanced.\n\n>>> will_it_fly([3], 5)\nTrue\n# 3 is less than the maximum possible weight, and it's balanced.\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([1, 2, 3, 2, 1], 9) == True\n    assert candidate([1, 2, 3, 2, 1], 8) == False\n    assert candidate([1, 2, 3], 6) == False\n    assert candidate([1, 1], 2) == True\n    assert candidate([5], 10) == True",
+        "entry_point": "will_it_fly"
+    },
+    {
+        "task_id": "CoopHumanEval/2",
+        "prompt": "def valid_date(date):\n    '''Write a function which validates a given date string and\n    returns True if the date is valid otherwise False.\n    The date is valid if all of the following rules are satisfied:\n    1. The date string is not empty.\n    2. The number of days is not less than 1 or higher than 31 days for months 1,3,5,7,8,10,12. And the number of days is not less than 1 or higher than 30 days for months 4,6,9,11. And, the number of days is not less than 1 or higher than 29 for the month 2.\n    3. The months should not be less than 1 or higher than 12.\n    4. The date should be in the format: mm-dd-yyyy\n\nFor example:\n>>> valid_date('03-11-2000')\nTrue\n\n>>> valid_date('15-01-2012')\nFalse\n\n>>> valid_date('04-0-2040')\nFalse\n\n>>> valid_date('06-04-2020')\nTrue\n\n>>> valid_date('06/04/2020')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('15-01-2023') == True\n    assert candidate('32-01-2023') == False\n    assert candidate('29-02-2024') == True\n    assert candidate('29-02-2023') == False\n    assert candidate('invalid-date') == False",
+        "entry_point": "valid_date"
+    },
+    {
+        "task_id": "CoopHumanEval/3",
+        "prompt": "def unique_digits(x):\n    '''Write a function that given a list of positive integers x, returns a sorted list of all \n    elements that hasn't any even digit.\n\n    Note: Returned list should be sorted in increasing order.\n\nFor example:\n>>> unique_digits([15, 33, 1422, 1])\n[1, 15, 33]\n>>> unique_digits([152, 323, 1422, 10])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([15, 33, 1422, 1]) == [1, 15, 33]\n    assert candidate([152, 323, 1422, 10]) == []\n    assert candidate([1357, 2468, 9999]) == [1357, 9999]\n    assert candidate([111, 333, 555, 777, 999]) == [111, 333, 555, 777, 999]\n    assert candidate([]) == []",
+        "entry_point": "unique_digits"
+    },
+    {
+        "task_id": "CoopHumanEval/4",
+        "prompt": "def unique(l: list):\n    '''Write a function to return sorted unique elements in a list\n>>> unique([5, 3, 5, 2, 3, 3, 9, 0, 123])\n[0, 2, 3, 5, 9, 123]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([5, 3, 5, 2, 3, 3, 9, 0, 123]) == [0, 2, 3, 5, 9, 123]\n    assert candidate([1, 1, 1, 1]) == [1]\n    assert candidate([]) == []\n    assert candidate([1, 2, 3, 4, 5]) == [1, 2, 3, 4, 5]\n    assert candidate([-1, -2, -1, 0, 1, 2]) == [-2, -1, 0, 1, 2]",
+        "entry_point": "unique"
+    },
+    {
+        "task_id": "CoopHumanEval/5",
+        "prompt": "def truncate_number(number: float) -> float:\n    '''Given a positive floating point number, it can be decomposed into\n    and integer part (largest integer smaller than given number) and decimals\n    (leftover part always smaller than 1).\n\n    Write a function to return the decimal part of the number.\n>>> truncate_number(3.5)\n0.5\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3.5) == 0.5\n    assert abs(candidate(-2.3) - 0.7) < 1e-9\n    assert candidate(10) == 0.0\n    assert candidate(0.123) == 0.123\n    assert abs(candidate(-5.75) - 0.25) < 1e-9",
+        "entry_point": "truncate_number"
+    },
+    {
+        "task_id": "CoopHumanEval/6",
+        "prompt": "def simplify(x, n):\n    '''Write a function to implement a function that will simplify the expression\n    x * n. The function returns True if x * n evaluates to a whole number and False\n    otherwise. Both x and n, are string representation of a fraction, and have the following format,\n    <numerator>/<denominator> where both numerator and denominator are positive whole numbers.\n\n    You can assume that x, and n are valid fractions, and do not have zero as denominator.\n\n>>> simplify('1/5', '5/1')\nTrue\n>>> simplify('1/6', '2/1')\nFalse\n>>> simplify('7/10', '10/2')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('1/5', '5/1') == True\n    assert candidate('1/6', '2/1') == False\n    assert candidate('3/4', '4/3') == True\n    assert candidate('7/10', '10/7') == True\n    assert candidate('1/2', '1/3') == False",
+        "entry_point": "simplify"
+    },
+    {
+        "task_id": "CoopHumanEval/7",
+        "prompt": "def same_chars(s0: str, s1: str):\n    '''Write a function to check if two words have the same characters.\n>>> same_chars('eabcdzzzz', 'dddzzzzzzzddeddabc')\nTrue\n>>> same_chars('abcd', 'dddddddabc')\nTrue\n>>> same_chars('dddddddabc', 'abcd')\nTrue\n>>> same_chars('eabcd', 'dddddddabc')\nFalse\n>>> same_chars('abcd', 'dddddddabce')\nFalse\n>>> same_chars('eabcdzzzz', 'dddzzzzzzzddddabc')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('eabcd', 'abcde') == True\n    assert candidate('abc', 'def') == False\n    assert candidate('abc', 'cba') == True\n    assert candidate('aabbcc', 'abc') == True\n    assert candidate('', '') == True",
+        "entry_point": "same_chars"
+    },
+    {
+        "task_id": "CoopHumanEval/8",
+        "prompt": "def right_angle_triangle(a, b, c):\n    '''Given the lengths of the three sides of a triangle. Return True if the three\n    sides form a right-angled triangle, False otherwise.\n    A right-angled triangle is a triangle in which one angle is right angle or \n    90 degree.\n\nFor example:\n>>> right_angle_triangle(3, 4, 5)\nTrue\n>>> right_angle_triangle(1, 2, 3)\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3, 4, 5) == True\n    assert candidate(1, 1, 1) == False\n    assert candidate(5, 12, 13) == True\n    assert candidate(8, 15, 17) == True\n    assert candidate(1, 2, 3) == False",
+        "entry_point": "right_angle_triangle"
+    },
+    {
+        "task_id": "CoopHumanEval/9",
+        "prompt": "def prime_length(string):\n    '''Write a function that takes a string and returns True if the string\n    length is a prime number or False otherwise\n\nFor example:\n>>> prime_length('Hello')\nTrue\n>>> prime_length('abcdcba')\nTrue\n>>> prime_length('kittens')\nTrue\n>>> prime_length('orange')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('Hello') == True\n    assert candidate('abcdcba') == True\n    assert candidate('test') == False\n    assert candidate('a') == False\n    assert candidate('ab') == True",
+        "entry_point": "prime_length"
+    },
+    {
+        "task_id": "CoopHumanEval/10",
+        "prompt": "def prime_fib(n: int):\n    '''prime_fib returns n-th number that is a Fibonacci number and it's also prime.\n>>> prime_fib(1)\n2\n>>> prime_fib(2)\n3\n>>> prime_fib(3)\n5\n>>> prime_fib(4)\n13\n>>> prime_fib(5)\n89\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(1) == 2\n    assert candidate(2) == 3\n    assert candidate(3) == 5\n    assert candidate(4) == 13\n    assert candidate(5) == 89",
+        "entry_point": "prime_fib"
+    },
+    {
+        "task_id": "CoopHumanEval/11",
+        "prompt": "def largest_prime_factor(n: int):\n    '''Write a function to return the largest prime factor of n. Assume n > 1 and is not a prime.\n>>> largest_prime_factor(13195)\n29\n>>> largest_prime_factor(2048)\n2\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(15) == 5\n    assert candidate(80) == 5\n    assert candidate(13) == 13\n    assert candidate(24) == 3\n    assert candidate(100) == 5",
+        "entry_point": "largest_prime_factor"
+    },
+    {
+        "task_id": "CoopHumanEval/12",
+        "prompt": "def is_multiply_prime(a):\n    '''Write a function that returns true if the given number is the multiplication of 3 prime numbers\n    and false otherwise.\n    Knowing that (a) is less then 100.\n\nFor example:\n>>> is_multiply_prime(30)\nTrue\n# 30 = 2 * 3 * 5\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(30) == True\n    assert candidate(45) == False\n    assert candidate(8) == True\n    assert candidate(12) == False\n    assert candidate(105) == False",
+        "entry_point": "is_multiply_prime"
+    },
+    {
+        "task_id": "CoopHumanEval/13",
+        "prompt": "def is_happy(s):\n    '''You are given a string s.\n    Your task is to check if the string is happy or not.\n    A string is happy if its length is at least 3 and every 3 consecutive letters are distinct\n\nFor example:\n>>> is_happy('a')\nFalse\n>>> is_happy('aa')\nFalse\n>>> is_happy('abcd')\nTrue\n>>> is_happy('aabb')\nFalse\n>>> is_happy('adb')\nTrue\n>>> is_happy('xyy')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('abc') == True\n    assert candidate('aab') == False\n    assert candidate('abcd') == True\n    assert candidate('aabb') == False\n    assert candidate('abcdefg') == True",
+        "entry_point": "is_happy"
+    },
+    {
+        "task_id": "CoopHumanEval/14",
+        "prompt": "def skjkasdkd(lst):\n    '''You are given a list of integers.\n    You need to find the largest prime value and return the sum of its digits.\n\nFor example:\n>>> lst = [0,3,2,1,3,5,7,4,5,5,5,2,181,32,4,32,3,2,32,324,4,3]\n10\n>>> lst = [1,0,1,8,2,4597,2,1,3,40,1,2,1,2,4,2,5,1]\n25\n>>> lst = [1,3,1,32,5107,34,83278,109,163,23,2323,32,30,1,9,3]\n13\n>>> lst = [0,724,32,71,99,32,6,0,5,91,83,0,5,6]\n11\n>>> lst = [0,81,12,3,1,21]\n3\n>>> lst = [0,8,1,2,1,7]\n7\n'''\n",
+        "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate([0,3,2,1,3,5,7,4,5,5,5,2,181,32,4,32,3,2,32,324,4,3]) == 10, \"This prints if this assert fails 1 (good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([1,0,1,8,2,4597,2,1,3,40,1,2,1,2,4,2,5,1]) == 25, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([1,3,1,32,5107,34,83278,109,163,23,2323,32,30,1,9,3]) == 13, \"This prints if this assert fails 3 (also good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([0,724,32,71,99,32,6,0,5,91,83,0,5,6]) == 11, \"This prints if this assert fails 4 (also good for debugging!)\"\n    \n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([0,81,12,3,1,21]) == 3, \"This prints if this assert fails 5 (also good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([0,8,1,2,1,7]) == 7, \"This prints if this assert fails 6 (also good for debugging!)\"\n\n    assert candidate([8191]) == 19, \"This prints if this assert fails 7 (also good for debugging!)\"\n    assert candidate([8191, 123456, 127, 7]) == 19, \"This prints if this assert fails 8 (also good for debugging!)\"\n    assert candidate([127, 97, 8192]) == 10, \"This prints if this assert fails 9 (also good for debugging!)\"\n",
+        "entry_point": "skjkasdkd"
+    },
+    {
+        "task_id": "CoopHumanEval/15",
+        "prompt": "from typing import List\n\n\ndef factorize(n: int) -> List[int]:\n    '''Write a function to return list of prime factors of given integer in the order from smallest to largest.\n    Each of the factors should be listed number of times corresponding to how many times it appeares in factorization.\n    Input number should be equal to the product of all factors\n>>> factorize(8)\n[2, 2, 2]\n>>> factorize(25)\n[5, 5]\n>>> factorize(70)\n[2, 5, 7]\n'''\n",
+        "test": "\n\nMETADATA = {\n    'author': 'jt',\n    'dataset': 'test'\n}\n\n\ndef check(candidate):\n    assert candidate(2) == [2]\n    assert candidate(4) == [2, 2]\n    assert candidate(8) == [2, 2, 2]\n    assert candidate(3 * 19) == [3, 19]\n    assert candidate(3 * 19 * 3 * 19) == [3, 3, 19, 19]\n    assert candidate(3 * 19 * 3 * 19 * 3 * 19) == [3, 3, 3, 19, 19, 19]\n    assert candidate(3 * 19 * 19 * 19) == [3, 19, 19, 19]\n    assert candidate(3 * 2 * 3) == [2, 3, 3]\n",
+        "entry_point": "factorize"
+    },
+    {
+        "task_id": "CoopHumanEval/16",
+        "prompt": "def consecutive_repeated_chars(string_array):\n    '''Write a function to filter strings with consecutive repeated characters.\n\nFor example:\n>>> consecutive_repeated_chars(['hello', 'world', 'aabb', 'test'])\n['hello', 'aabb']\n>>> consecutive_repeated_chars(['abc', 'def', 'ggg', 'xyz'])\n['ggg']\n>>> consecutive_repeated_chars(['a', 'ab', 'abc'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['hello', 'world', 'aabb', 'test']) == ['hello', 'aabb']\n    assert candidate(['abc', 'def', 'ggg', 'xyz']) == ['ggg']\n    assert candidate(['a', 'ab', 'abc']) == []\n    assert candidate(['aa', 'bb', 'cc', 'dd']) == ['aa', 'bb', 'cc', 'dd']\n    assert candidate(['abba', 'cddc', 'effg']) == ['abba', 'cddc', 'effg']",
+        "entry_point": "consecutive_repeated_chars"
+    },
+    {
+        "task_id": "CoopHumanEval/17",
+        "prompt": "def mountain_shaped_arrays(arrays):\n    '''Write a function to check which arrays are mountain-shaped.\n\nFor example:\n>>> mountain_shaped_arrays([[1, 3, 2], [1, 2, 3], [1, 3, 5, 3, 1]])\n[[1, 3, 2], [1, 3, 5, 3, 1]]\n>>> mountain_shaped_arrays([[1, 2, 2, 1], [3, 2, 1], [1, 2, 3, 2, 1]])\n[[1, 2, 3, 2, 1]]\n>>> mountain_shaped_arrays([[1], [1, 2], [3, 2, 1]])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[1, 3, 2], [1, 2, 3], [1, 3, 5, 3, 1]]) == [[1, 3, 2], [1, 3, 5, 3, 1]]\n    assert candidate([[1, 2, 2, 1], [3, 2, 1], [1, 2, 3, 2, 1]]) == [[1, 2, 3, 2, 1]]\n    assert candidate([[1], [1, 2], [3, 2, 1]]) == []\n    assert candidate([[1, 5, 1], [2, 4, 3, 1], [1, 2, 1]]) == [[1, 5, 1], [2, 4, 3, 1], [1, 2, 1]]\n    assert candidate([[5, 4, 3, 2, 1], [1, 2, 3, 4, 5]]) == []",
+        "entry_point": "mountain_shaped_arrays"
+    },
+    {
+        "task_id": "CoopHumanEval/18",
+        "prompt": "def contains_all_vowels(string_array):\n    '''Write a function to filter strings containing all vowels.\n\nFor example:\n>>> contains_all_vowels(['aeiou', 'hello', 'education', 'world'])\n['aeiou', 'education']\n>>> contains_all_vowels(['sequoia', 'facetious', 'test'])\n['sequoia', 'facetious']\n>>> contains_all_vowels(['abc', 'def', 'xyz'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['aeiou', 'hello', 'education', 'world']) == ['aeiou', 'education']\n    assert candidate(['sequoia', 'facetious', 'test']) == ['sequoia', 'facetious']\n    assert candidate(['abc', 'def', 'xyz']) == []\n    assert candidate(['AEIOU', 'AeIoU', 'aEiOu']) == ['AEIOU', 'AeIoU', 'aEiOu']\n    assert candidate(['equation', 'cautioned', 'authorized']) == ['equation', 'cautioned', 'authorized']",
+        "entry_point": "contains_all_vowels"
+    },
+    {
+        "task_id": "CoopHumanEval/19",
+        "prompt": "def all_even_subarrays(arr):\n    '''Write a function to find all subarrays where all elements are even.\n\nFor example:\n>>> all_even_subarrays([2, 4, 6, 8])\n[[2], [2, 4], [2, 4, 6], [2, 4, 6, 8], [4], [4, 6], [4, 6, 8], [6], [6, 8], [8]]\n>>> all_even_subarrays([1, 2, 3, 4])\n[[2], [4]]\n>>> all_even_subarrays([1, 3, 5])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([2, 4, 6, 8]) == [[2], [2, 4], [2, 4, 6], [2, 4, 6, 8], [4], [4, 6], [4, 6, 8], [6], [6, 8], [8]]\n    assert candidate([1, 2, 3, 4]) == [[2], [4]]\n    assert candidate([1, 3, 5]) == []\n    assert candidate([2]) == [[2]]\n    assert candidate([]) == []",
+        "entry_point": "all_even_subarrays"
+    },
+    {
+        "task_id": "CoopHumanEval/20",
+        "prompt": "def valid_reversed_words(string_array):\n    '''Write a function to return strings that are still valid words when reversed.\n\nFor example:\n>>> valid_reversed_words(['abc', 'def', 'test', '123'])\n['abc', 'def', 'test']\n>>> valid_reversed_words(['hello', 'world', '!test', 'abc123'])\n['hello', 'world']\n>>> valid_reversed_words(['', '123', '!!!'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['abc', 'def', 'test', '123']) == ['abc', 'def', 'test']\n    assert candidate(['hello', 'world', '!test', 'abc123']) == ['hello', 'world']\n    assert candidate(['', '123', '!!!']) == []\n    assert candidate(['mom', 'dad', 'level']) == ['mom', 'dad', 'level']\n    assert candidate(['Test', 'teST', 'TEST']) == ['Test', 'teST', 'TEST']",
+        "entry_point": "valid_reversed_words"
+    },
+    {
+        "task_id": "CoopHumanEval/21",
+        "prompt": "def unique_element_subarrays(arr):\n    '''Write a function to find all subarrays with no duplicate elements.\n\nFor example:\n>>> unique_element_subarrays([1, 2, 1])\n[[1], [1, 2], [2], [2, 1], [1]]\n>>> unique_element_subarrays([1, 2, 3])\n[[1], [1, 2], [1, 2, 3], [2], [2, 3], [3]]\n>>> unique_element_subarrays([1, 1, 1])\n[[1], [1], [1]]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([1, 2, 1]) == [[1], [1, 2], [2], [2, 1], [1]]\n    assert candidate([1, 2, 3]) == [[1], [1, 2], [1, 2, 3], [2], [2, 3], [3]]\n    assert candidate([1, 1, 1]) == [[1], [1], [1]]\n    assert candidate([]) == []\n    assert candidate([1]) == [[1]]",
+        "entry_point": "unique_element_subarrays"
+    },
+    {
+        "task_id": "CoopHumanEval/22",
+        "prompt": "def units_tens_equals_hundreds(numbers):\n    '''Write a function to find 3-digit numbers where units + tens = hundreds.\n\nFor example:\n>>> units_tens_equals_hundreds([101, 110, 123, 321, 550])\n[101, 110, 321, 550]\n>>> units_tens_equals_hundreds([234, 345, 456])\n[]\n>>> units_tens_equals_hundreds([202, 303, 404])\n[202, 303, 404]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([101, 110, 123, 321, 550]) == [101, 110, 321, 550]\n    assert candidate([234, 345, 456]) == []\n    assert candidate([202, 303, 404]) == [202, 303, 404]\n    assert candidate([505, 606, 707, 808, 909]) == [505, 606, 707, 808, 909]\n    assert candidate([100, 211, 312, 413]) == [211, 312, 413]",
+        "entry_point": "units_tens_equals_hundreds"
+    },
+    {
+        "task_id": "CoopHumanEval/23",
+        "prompt": "def palindromic_numbers(arr):\n    '''Write a function to find all palindromic numbers in the array.\n\nFor example:\n>>> palindromic_numbers([121, 123, 454, 789, 898])\n[121, 454, 898]\n>>> palindromic_numbers([11, 22, 33, 45])\n[11, 22, 33]\n>>> palindromic_numbers([123, 456, 789])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([121, 123, 454, 789, 898]) == [121, 454, 898]\n    assert candidate([11, 22, 33, 45]) == [11, 22, 33]\n    assert candidate([123, 456, 789]) == []\n    assert candidate([1, 2, 3, 4, 5, 6, 7, 8, 9]) == [1, 2, 3, 4, 5, 6, 7, 8, 9]\n    assert candidate([1001, 1111, 1221, 1234]) == [1001, 1111, 1221]",
+        "entry_point": "palindromic_numbers"
+    },
+    {
+        "task_id": "CoopHumanEval/24",
+        "prompt": "def perfect_square_sum_pairs(pairs):\n    '''Write a function to find pairs whose sum is perfect square.\n\nFor example:\n>>> perfect_square_sum_pairs([(1, 3), (2, 2), (3, 6), (5, 4)])\n[(1, 3), (2, 2), (3, 6), (5, 4)]\n>>> perfect_square_sum_pairs([(1, 2), (3, 4), (5, 6)])\n[]\n>>> perfect_square_sum_pairs([(0, 0), (1, 0), (2, 7)])\n[(0, 0), (1, 0), (2, 7)]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([(1, 3), (2, 2), (3, 6), (5, 4)]) == [(1, 3), (2, 2), (3, 6), (5, 4)]\n    assert candidate([(1, 2), (3, 4), (5, 6)]) == []\n    assert candidate([(0, 0), (1, 0), (2, 7)]) == [(0, 0), (1, 0), (2, 7)]\n    assert candidate([(8, 8), (10, 15), (12, 13)]) == [(8, 8), (10, 15), (12, 13)]\n    assert candidate([]) == []",
+        "entry_point": "perfect_square_sum_pairs"
+    },
+    {
+        "task_id": "CoopHumanEval/25",
+        "prompt": "def arithmetic_sequences(lists):\n    '''Write a function to find lists that are arithmetic sequences.\n\nFor example:\n>>> arithmetic_sequences([[1, 2, 3], [2, 4, 6], [1, 3, 6], [5, 5, 5]])\n[[1, 2, 3], [2, 4, 6], [5, 5, 5]]\n>>> arithmetic_sequences([[1], [1, 2], [1, 2, 3, 4]])\n[[1], [1, 2], [1, 2, 3, 4]]\n>>> arithmetic_sequences([[1, 2, 4], [3, 5, 8]])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[1, 2, 3], [2, 4, 6], [1, 3, 6], [5, 5, 5]]) == [[1, 2, 3], [2, 4, 6], [5, 5, 5]]\n    assert candidate([[1], [1, 2], [1, 2, 3, 4]]) == [[1], [1, 2], [1, 2, 3, 4]]\n    assert candidate([[1, 2, 4], [3, 5, 8]]) == []\n    assert candidate([[], [0], [10, 20, 30, 40]]) == [[], [0], [10, 20, 30, 40]]\n    assert candidate([[-3, -1, 1, 3], [100, 90, 80, 70]]) == [[-3, -1, 1, 3], [100, 90, 80, 70]]",
+        "entry_point": "arithmetic_sequences"
+    },
+    {
+        "task_id": "CoopHumanEval/26",
+        "prompt": "def adjacent_same_digits(numbers):\n    '''Write a function to find numbers with adjacent same digits.\n\nFor example:\n>>> adjacent_same_digits([112, 123, 334, 445, 567])\n[112, 334, 445]\n>>> adjacent_same_digits([111, 222, 333, 444])\n[111, 222, 333, 444]\n>>> adjacent_same_digits([123, 456, 789])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([112, 123, 334, 445, 567]) == [112, 334, 445]\n    assert candidate([111, 222, 333, 444]) == [111, 222, 333, 444]\n    assert candidate([123, 456, 789]) == []\n    assert candidate([1001, 1223, 3344]) == [1001, 1223, 3344]\n    assert candidate([]) == []",
+        "entry_point": "adjacent_same_digits"
+    },
+    {
+        "task_id": "CoopHumanEval/27",
+        "prompt": "def fibonacci_sum_lists(lists):\n    '''Write a function to find lists whose sum is Fibonacci number.\n\nFor example:\n>>> fibonacci_sum_lists([[1, 2], [2, 3], [4, 5], [5, 8]])\n[[1, 2], [2, 3], [5, 8]]\n>>> fibonacci_sum_lists([[1, 1], [3, 3], [10, 11]])\n[[1, 1], [10, 11]]\n>>> fibonacci_sum_lists([[7], [9], [10]])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[1, 2], [2, 3], [4, 5], [5, 8]]) == [[1, 2], [2, 3], [5, 8]]\n    assert candidate([[1, 1], [3, 3], [10, 11]]) == [[1, 1], [10, 11]]\n    assert candidate([[7], [9], [10]]) == []\n    assert candidate([[0], [1], [2], [3], [5]]) == [[0], [1], [2], [3], [5]]\n    assert candidate([]) == []",
+        "entry_point": "fibonacci_sum_lists"
+    },
+    {
+        "task_id": "CoopHumanEval/28",
+        "prompt": "def half_decimal_numbers(numbers):\n    '''Write a function to find numbers with decimal part = 0.5.\n\nFor example:\n>>> half_decimal_numbers([1.5, 2.5, 3.0, 4.5, 5.25])\n[1.5, 2.5, 4.5]\n>>> half_decimal_numbers([0.5, 1.0, 1.5, 2.0])\n[0.5, 1.5]\n>>> half_decimal_numbers([1.1, 2.2, 3.3])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([1.5, 2.5, 3.0, 4.5, 5.25]) == [1.5, 2.5, 4.5]\n    assert candidate([0.5, 1.0, 1.5, 2.0]) == [0.5, 1.5]\n    assert candidate([1.1, 2.2, 3.3]) == []\n    assert candidate([-1.5, -0.5, 0.5, 10.5]) == [-1.5, -0.5, 0.5, 10.5]\n    assert candidate([]) == []",
+        "entry_point": "half_decimal_numbers"
+    },
+    {
+        "task_id": "CoopHumanEval/29",
+        "prompt": "def palindromic_substring_words(words):\n    '''Write a function to find words containing palindromic substrings.\n\nFor example:\n>>> palindromic_substring_words(['hello', 'noon', 'test', 'level'])\n['hello', 'noon', 'level']\n>>> palindromic_substring_words(['abc', 'def', 'ghi'])\n[]\n>>> palindromic_substring_words(['racecar', 'abba', 'xyz'])\n['racecar', 'abba']\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['hello', 'noon', 'test', 'level']) == ['hello', 'noon', 'level']\n    assert candidate(['abc', 'def', 'ghi']) == []\n    assert candidate(['racecar', 'abba', 'xyz']) == ['racecar', 'abba']\n    assert candidate(['aa', 'bb', 'cc']) == ['aa', 'bb', 'cc']\n    assert candidate([]) == []",
+        "entry_point": "palindromic_substring_words"
+    },
+    {
+        "task_id": "CoopHumanEval/30",
+        "prompt": "def odd_even_sum_numbers(n):\n    '''Write a function to find the first n odd numbers where sum of digits is even.\n\nFor example:\n>>> odd_even_sum_numbers(1)\n[13]\n>>> odd_even_sum_numbers(2)\n[13, 15]\n>>> odd_even_sum_numbers(3)\n[13, 15, 17]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(1) == [13]\n    assert candidate(2) == [13, 15]\n    assert candidate(3) == [13, 15, 17]\n    assert candidate(5) == [13, 15, 17, 19, 31]\n    assert candidate(10) == [13, 15, 17, 19, 31, 33, 35, 37, 39, 51]",
+        "entry_point": "odd_even_sum_numbers"
+    },
+    {
+        "task_id": "CoopHumanEval/31",
+        "prompt": "def uniform_strings(string_list):\n    '''Write a function to filter strings composed of same character.\n\nFor example:\n>>> uniform_strings(['aaa', 'abc', 'bbb', 'xyz', 'ccc'])\n['aaa', 'bbb', 'ccc']\n>>> uniform_strings(['a', 'aa', 'aaa', 'ab'])\n['a', 'aa', 'aaa']\n>>> uniform_strings(['hello', 'world'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['aaa', 'abc', 'bbb', 'xyz', 'ccc']) == ['aaa', 'bbb', 'ccc']\n    assert candidate(['a', 'aa', 'aaa', 'ab']) == ['a', 'aa', 'aaa']\n    assert candidate(['hello', 'world']) == []\n    assert candidate(['111', '222', '123']) == ['111', '222']\n    assert candidate(['']) == []",
+        "entry_point": "uniform_strings"
+    },
+    {
+        "task_id": "CoopHumanEval/32",
+        "prompt": "def properly_capitalized_strings(string_list):\n    '''Write a function to filter strings with first letter capitalized and rest lowercase.\n\nFor example:\n>>> properly_capitalized_strings(['Hello', 'WORLD', 'Python', 'TEST'])\n['Hello', 'Python']\n>>> properly_capitalized_strings(['Apple', 'banana', 'Cherry', 'DATE'])\n['Apple', 'Cherry']\n>>> properly_capitalized_strings(['abc', 'ABC', 'Abc'])\n['Abc']\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['Hello', 'WORLD', 'Python', 'TEST']) == ['Hello', 'Python']\n    assert candidate(['Apple', 'banana', 'Cherry', 'DATE']) == ['Apple', 'Cherry']\n    assert candidate(['abc', 'ABC', 'Abc']) == ['Abc']\n    assert candidate(['A', 'a', 'AA', 'Aa']) == ['A', 'Aa']\n    assert candidate(['']) == []",
+        "entry_point": "properly_capitalized_strings"
+    },
+    {
+        "task_id": "CoopHumanEval/33",
+        "prompt": "def digit_square_sum_below_threshold(n, threshold):\n    '''Write a function to find the first n numbers where sum of digit squares is below threshold.\n\nFor example:\n>>> digit_square_sum_below_threshold(3, 10)\n[1, 2, 3]\n>>> digit_square_sum_below_threshold(5, 20)\n[1, 2, 3, 4, 10]\n>>> digit_square_sum_below_threshold(4, 5)\n[1, 2, 10, 11]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3, 10) == [1, 2, 3]\n    assert candidate(5, 20) == [1, 2, 3, 4, 10]\n    assert candidate(4, 5) == [1, 2, 10, 11]\n    assert candidate(6, 30) == [1, 2, 3, 4, 5, 10]\n    assert candidate(2, 2) == [1, 10]",
+        "entry_point": "digit_square_sum_below_threshold"
+    },
+    {
+        "task_id": "CoopHumanEval/34",
+        "prompt": "def repeated_pattern_strings(string_list):\n    '''Write a function to filter strings composed of repeated pattern.\n\nFor example:\n>>> repeated_pattern_strings(['abab', 'abcabc', 'hello', 'xyzxyz'])\n['abab', 'abcabc', 'xyzxyz']\n>>> repeated_pattern_strings(['aaa', 'abcdef', 'xyxy'])\n['aaa', 'xyxy']\n>>> repeated_pattern_strings(['a', 'ab', 'abc'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['abab', 'abcabc', 'hello', 'xyzxyz']) == ['abab', 'abcabc', 'xyzxyz']\n    assert candidate(['aaa', 'abcdef', 'xyxy']) == ['aaa', 'xyxy']\n    assert candidate(['a', 'ab', 'abc']) == []\n    assert candidate(['aa', 'bb', 'abcabcabc']) == ['aa', 'bb', 'abcabcabc']\n    assert candidate(['']) == []",
+        "entry_point": "repeated_pattern_strings"
+    },
+    {
+        "task_id": "CoopHumanEval/35",
+        "prompt": "def prime_minimum_arrays(array_list):\n    '''Write a function to filter arrays where minimum value is prime.\n\nFor example:\n>>> prime_minimum_arrays([[2, 3, 4], [1, 2, 3], [5, 6, 7], [0, 1, 2]])\n[[2, 3, 4], [5, 6, 7]]\n>>> prime_minimum_arrays([[7, 8, 9], [11, 12], [4, 5, 6]])\n[[7, 8, 9], [11, 12]]\n>>> prime_minimum_arrays([[0], [1], [4]])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[2, 3, 4], [1, 2, 3], [5, 6, 7], [0, 1, 2]]) == [[2, 3, 4], [5, 6, 7]]\n    assert candidate([[7, 8, 9], [11, 12], [4, 5, 6]]) == [[7, 8, 9], [11, 12]]\n    assert candidate([[0], [1], [4]]) == []\n    assert candidate([[2], [3], [5], [7], [11]]) == [[2], [3], [5], [7], [11]]\n    assert candidate([[]]) == []",
+        "entry_point": "prime_minimum_arrays"
+    },
+    {
+        "task_id": "CoopHumanEval/36",
+        "prompt": "def even_pairwise_differences(array_list):\n    '''Write a function to filter arrays where all pairwise differences are even.\n\nFor example:\n>>> even_pairwise_differences([[2, 4, 6], [1, 3, 5], [0, 2, 8]])\n[[2, 4, 6], [1, 3, 5], [0, 2, 8]]\n>>> even_pairwise_differences([[1, 2, 3], [5, 6, 7]])\n[]\n>>> even_pairwise_differences([[10], []])\n[[10], []]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[2, 4, 6], [1, 3, 5], [0, 2, 8]]) == [[2, 4, 6], [1, 3, 5], [0, 2, 8]]\n    assert candidate([[1, 2, 3], [5, 6, 7]]) == []\n    assert candidate([[10], []]) == [[10], []]\n    assert candidate([[2, 2, 2], [1, 1, 1]]) == [[2, 2, 2], [1, 1, 1]]\n    assert candidate([[0, 4, 8], [1, 5, 9]]) == [[0, 4, 8], [1, 5, 9]]",
+        "entry_point": "even_pairwise_differences"
+    },
+    {
+        "task_id": "CoopHumanEval/37",
+        "prompt": "def odd_positions_odd_numbers(array_list):\n    '''Write a function to filter arrays where odd positions contain only odd numbers.\n\nFor example:\n>>> odd_positions_odd_numbers([[1, 2, 3, 4], [5, 6, 7, 8], [1, 0, 1, 0]])\n[[1, 2, 3, 4], [5, 6, 7, 8], [1, 0, 1, 0]]\n>>> odd_positions_odd_numbers([[2, 1, 4, 3], [0, 0, 0, 0]])\n[]\n>>> odd_positions_odd_numbers([[7], [9, 8]])\n[[7], [9, 8]]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[1, 2, 3, 4], [5, 6, 7, 8], [1, 0, 1, 0]]) == [[1, 2, 3, 4], [5, 6, 7, 8], [1, 0, 1, 0]]\n    assert candidate([[2, 1, 4, 3], [0, 0, 0, 0]]) == []\n    assert candidate([[7], [9, 8]]) == [[7], [9, 8]]\n    assert candidate([[1, 1, 1, 1], [3, 2, 5, 4]]) == [[1, 1, 1, 1], [3, 2, 5, 4]]\n    assert candidate([[]]) == [[]]",
+        "entry_point": "odd_positions_odd_numbers"
+    },
+    {
+        "task_id": "CoopHumanEval/38",
+        "prompt": "def uniform_frequency_arrays(array_list):\n    '''Write a function to filter arrays where all elements have same frequency.\n\nFor example:\n>>> uniform_frequency_arrays([[1, 1, 2, 2], [1, 2, 3], [1, 1, 1]])\n[[1, 1, 2, 2], [1, 2, 3], [1, 1, 1]]\n>>> uniform_frequency_arrays([[1, 1, 2], [1, 2, 2, 3, 3]])\n[]\n>>> uniform_frequency_arrays([[]])\n[[]]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[1, 1, 2, 2], [1, 2, 3], [1, 1, 1]]) == [[1, 1, 2, 2], [1, 2, 3], [1, 1, 1]]\n    assert candidate([[1, 1, 2], [1, 2, 2, 3, 3]]) == []\n    assert candidate([[]]) == [[]]\n    assert candidate([[4, 4, 4, 5, 5, 5], [7, 8, 9, 7, 8, 9]]) == [[4, 4, 4, 5, 5, 5], [7, 8, 9, 7, 8, 9]]\n    assert candidate([[1, 2, 1, 2, 3]]) == []",
+        "entry_point": "uniform_frequency_arrays"
+    },
+    {
+        "task_id": "CoopHumanEval/39",
+        "prompt": "def next_palindrome(n):\n    '''Write a function to find the next smallest palindrome greater than the specified number.\n\nFor example:\n>>> next_palindrome(100)\n101\n>>> next_palindrome(121)\n131\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(87) == 88\n    assert candidate(12) == 22\n    assert candidate(1000) == 1001\n    assert candidate(1992) == 2002\n    assert candidate(123322) == 124421\n",
+        "entry_point": "next_palindrome"
+    },
+    {
+        "task_id": "CoopHumanEval/40",
+        "prompt": "def prime_lcm_gcd(n):\n    '''Write a function that checks if a number is prime. If yes, return the LCM of the number and 12; otherwise, return the GCD of the number and 12.\n\nFor example:\n>>> prime_lcm_gcd(5)\n60\n>>> prime_lcm_gcd(7)\n84\n>>> prime_lcm_gcd(8)\n4\n>>> prime_lcm_gcd(9)\n3\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(11) == 132\n    assert candidate(6) == 6\n    assert candidate(15) == 3\n    assert candidate(18) == 6\n    assert candidate(21) == 3",
+        "entry_point": "prime_lcm_gcd"
+    },
+    {
+        "task_id": "CoopHumanEval/41",
+        "prompt": "def palindrome_pairs(string_list):\n    '''Write a function to find palindrome pairs in string list.\n\nFor example:\n>>> palindrome_pairs(['abc', 'def', 'cba', 'fed'])\n[('abc', 'cba'), ('def', 'fed')]\n>>> palindrome_pairs(['hello', 'world', 'olleh'])\n[('hello', 'olleh')]\n>>> palindrome_pairs(['a', 'b', 'aa'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['abc', 'def', 'cba', 'fed']) == [('abc', 'cba'), ('def', 'fed')]\n    assert candidate(['hello', 'world', 'olleh']) == [('hello', 'olleh')]\n    assert candidate(['a', 'b', 'aa']) == []\n    assert candidate(['ab', 'ba', 'aa', 'bb']) == [('ab', 'ba')]\n    assert candidate([]) == []",
+        "entry_point": "palindrome_pairs"
+    },
+    {
+        "task_id": "CoopHumanEval/42",
+        "prompt": "def educational_emails(email_list):\n    '''Write a function to filter educational email addresses.\n\nFor example:\n>>> educational_emails(['john@harvard.edu', 'jane@gmail.com', 'prof@mit.edu'])\n['john@harvard.edu', 'prof@mit.edu']\n>>> educational_emails(['student@stanford.edu', 'admin@company.com'])\n['student@stanford.edu']\n>>> educational_emails(['test@example.com', 'info@website.org'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['john@harvard.edu', 'jane@gmail.com', 'prof@mit.edu']) == ['john@harvard.edu', 'prof@mit.edu']\n    assert candidate(['student@stanford.edu', 'admin@company.com']) == ['student@stanford.edu']\n    assert candidate(['test@example.com', 'info@website.org']) == []\n    assert candidate(['jack@northeastern.edu', 'robert@tufts.edu']) == ['jack@northeastern.edu', 'robert@tufts.edu']\n    assert candidate([]) == []",
+        "entry_point": "educational_emails"
+    },
+    {
+        "task_id": "CoopHumanEval/43",
+        "prompt": "def special_month_dates(dates):\n    '''Write a function to find dates that are the first or last day of a month.\n    Input is a list of tuples in format (month, day, year).\n\nFor example:\n>>> special_month_dates([(1, 1, 2023), (2, 15, 2023), (2, 28, 2023)])\n[(1, 1, 2023), (2, 28, 2023)]\n>>> special_month_dates([(3, 10, 2023), (4, 20, 2023), (5, 25, 2023)])\n[]\n>>> special_month_dates([(6, 1, 2023), (6, 30, 2023), (7, 1, 2023)])\n[(6, 1, 2023), (6, 30, 2023), (7, 1, 2023)]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([(1, 1, 2023), (2, 15, 2023), (2, 28, 2023)]) == [(1, 1, 2023), (2, 28, 2023)]\n    assert candidate([(6, 1, 2023), (6, 30, 2023), (7, 1, 2023)]) == [(6, 1, 2023), (6, 30, 2023), (7, 1, 2023)]\n    assert candidate([(12, 31, 2023), (1, 1, 2024), (2, 29, 2024)]) == [(12, 31, 2023), (1, 1, 2024), (2, 29, 2024)]\n    assert candidate([]) == []\n    assert candidate([(2, 28, 2024), (2, 29, 2024)]) == [(2, 29, 2024)]\n",
+        "entry_point": "special_month_dates"
+    },
+    {
+        "task_id": "CoopHumanEval/44",
+        "prompt": "def reverse_mirror_pairs(string_pairs):\n    '''Write a function to find string pairs that are reverse mirrors.\n\nFor example:\n>>> reverse_mirror_pairs([('abc', 'cba'), ('hello', 'world'), ('12', '21')])\n[('abc', 'cba'), ('12', '21')]\n>>> reverse_mirror_pairs([('test', 'tset'), ('ab', 'ba'), ('xyz', 'zyx')])\n[('ab', 'ba'), ('xyz', 'zyx')]\n>>> reverse_mirror_pairs([('same', 'same'), ('diff', 'rent')])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([('abc', 'cba'), ('hello', 'world'), ('12', '21')]) == [('abc', 'cba'), ('12', '21')]\n    assert candidate([('test', 'tset'), ('ab', 'ba'), ('xyz', 'zyx')]) == [('ab', 'ba'), ('xyz', 'zyx')]\n    assert candidate([('same', 'same'), ('diff', 'rent')]) == []\n    assert candidate([('a', 'a'), ('', ''), ('123', '321')]) == [('a', 'a'), ('', ''), ('123', '321')]\n    assert candidate([]) == []",
+        "entry_point": "reverse_mirror_pairs"
+    },
+    {
+        "task_id": "CoopHumanEval/45",
+        "prompt": "def prime_ascii_sum_words(words):\n    '''Write a function to find words whose ASCII sum is prime.\n\nFor example:\n>>> prime_ascii_sum_words(['a', 'aa', 'abc', 'hi'])\n['a', 'hi']\n>>> prime_ascii_sum_words(['test', 'prime', 'word'])\n['prime']\n>>> prime_ascii_sum_words(['xyz', 'ABC', '123'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['a', 'aa', 'abc', 'hi']) == ['a', 'hi']\n    assert candidate(['test', 'prime', 'word']) == ['prime']\n    assert candidate(['xyz', 'ABC', '123']) == []\n    assert candidate(['A', 'B', 'C']) == ['C']\n    assert candidate(['algorithm', 'philosophy']) == ['algorithm', 'philosophy']\n",
+        "entry_point": "prime_ascii_sum_words"
+    },
+    {
+        "task_id": "CoopHumanEval/46",
+        "prompt": "def same_first_last_char(strings):\n    '''Write a function to find strings with same first and last character.\n\nFor example:\n>>> same_first_last_char(['aba', 'hello', 'mom', 'test', 'level'])\n['aba', 'mom', 'test', 'level']\n>>> same_first_last_char(['a', 'aa', 'aaa', 'abc'])\n['a', 'aa', 'aaa']\n>>> same_first_last_char(['hello', 'world', 'python'])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['aba', 'hello', 'mom', 'test', 'level']) == ['aba', 'mom', 'test', 'level']\n    assert candidate(['a', 'aa', 'aaa', 'abc']) == ['a', 'aa', 'aaa']\n    assert candidate(['hello', 'world', 'python']) == []\n    assert candidate(['']) == []\n    assert candidate(['racecar', 'noon', 'eve']) == ['racecar', 'noon', 'eve']",
+        "entry_point": "same_first_last_char"
+    },
+    {
+        "task_id": "CoopHumanEval/47",
+        "prompt": "def find_armstrong_numbers(numbers):\n    '''An Armstrong number is a number that is equal to the sum of its own digits each raised to the power of the number of digits.\n\nWrite a function to find all Armstrong numbers from the given list.\n\nFor example:\n>>> find_armstrong_numbers([153, 123, 370, 371])\n[153, 370, 371]\n>>> find_armstrong_numbers([1, 2, 3, 4, 5, 6, 7, 8, 9])\n[1, 2, 3, 4, 5, 6, 7, 8, 9]\n>>> find_armstrong_numbers([10, 100, 1000])\n[]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([153, 370]) == [153, 370]\n    assert candidate([1, 2, 3, 4, 5]) == [1, 2, 3, 4, 5]\n    assert candidate([371, 1634]) == [371, 1634]\n    assert candidate([11, 111, 1111]) == []\n    assert candidate([8208, 9474]) == [8208, 9474]",
+        "entry_point": "find_armstrong_numbers"
+    },
+    {
+        "task_id": "CoopHumanEval/48",
+        "prompt": "def is_acute_triangle(angles):\n    '''An acute triangle is a triangle where all three angles are less than 90 degrees.\n The function takes a list of three angles and returns True if they form an acute triangle,\n    False otherwise. The angles should sum to 180 degrees to form a valid triangle.\n\nWrite a function to check if the given angles form an acute triangle.\n\nFor example:\n>>> is_acute_triangle([60, 60, 60])\nTrue\n>>> is_acute_triangle([90, 45, 45])\nFalse\n>>> is_acute_triangle([80, 70, 30])\nTrue\n>>> is_acute_triangle([100, 40, 40])\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([60, 60, 60]) == True\n    assert candidate([90, 30, 60]) == False\n    assert candidate([89, 61, 30]) == True\n    assert candidate([100, 40, 40]) == False\n    assert candidate([89, 90, 1]) == False\n    assert candidate([120, 30, 30]) == False\n",
+        "entry_point": "is_acute_triangle"
+    },
+    {
+        "task_id": "CoopHumanEval/49",
+        "prompt": "def peter_prime_dates(month):\n    '''Peter only goes out on prime number dates (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31).\n    Assume February has 28 days (non-leap year).\n\nWrite a function that takes a month name and returns a list of prime dates when Peter can go out.\n\nFor example:\n>>> peter_prime_dates('February')\n[2, 3, 5, 7, 11, 13, 17, 19, 23]\n>>> peter_prime_dates('April')\n[2, 3, 5, 7, 11, 13, 17, 19, 23, 29]\n>>> peter_prime_dates('December')\n[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('May') == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]\n    assert candidate('April') == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]\n    assert candidate('December') == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]\n    assert candidate('January') == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]\n    assert candidate('June') == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]",
+        "entry_point": "peter_prime_dates"
+    },
+    {
+        "task_id": "CoopHumanEval/50",
+        "prompt": "def can_form_polygon(angles, n):\n    '''A valid n-sided polygon must have the sum of all interior angles equal to (n-2) × 180 degrees.\n\nWrite a function to check if the given angles can form an n-sided polygon. The first param is a list of angles, and the second param is the side number.\n\nFor example:\n>>> can_form_polygon([60, 60, 60], 3)\nTrue\n>>> can_form_polygon([90, 90, 90], 4)\nFalse\n>>> can_form_polygon([60, 60, 60, 60], 4)\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([90, 120, 150], 3) == False\n    assert candidate([80, 100, 120, 140], 4) == False\n    assert candidate([70, 80, 90, 120], 4) == True\n    assert candidate([60, 70, 50], 3) == True\n    assert candidate([140, 140, 140, 140, 140, 140, 140, 140, 140, 140], 10) == True",
+        "entry_point": "can_form_polygon"
+    },
+    {
+        "task_id": "CoopHumanEval/51",
+        "prompt": "def cici_wins(games):\n    '''Write a function that takes a list of tuples representing rock-paper-scissors games between Cici and Andy.\n    \n    Each tuple contains (Cici's choice, Andy's choice). Return the number of games Cici won.\n\nFor example:\n>>> cici_wins([('rock', 'scissors'), ('paper', 'rock'), ('paper', 'paper')])\n2\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([('rock', 'scissors'), ('paper', 'rock'), ('scissors', 'paper')]) == 3\n    assert candidate([('rock', 'paper'), ('scissors', 'rock')]) == 0\n    assert candidate([('rock', 'rock'), ('paper', 'scissors')]) == 0\n    assert candidate([('paper', 'rock'), ('rock', 'scissors')]) == 2\n    assert candidate([('scissors', 'paper'), ('paper', 'scissors'), ('rock', 'rock')]) == 1",
+        "entry_point": "cici_wins"
+    },
+    {
+        "task_id": "CoopHumanEval/52",
+        "prompt": "def calculate_area(dimensions):\n    '''Write a function that takes a list of 2, or 3 positive numbers. If the list has 2 elements, treat them as the length and width of a rectangle, and return the area of the rectangle. If the list has 3 elements, treat them as the side lengths of a triangle, and return the area of the triangle using Heron's formula.\n\nFor example:\n>>> calculate_area([1, 3])\n3\n>>> calculate_area([3, 4, 5])\n6\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([2, 5]) == 10\n    assert candidate([7, 3]) == 21\n    assert abs(candidate([3, 4, 5]) - 6.0) < 0.001\n    assert abs(candidate([2, 2, 3]) - 1.9843) < 0.001",
+        "entry_point": "calculate_area"
+    },
+    {
+        "task_id": "CoopHumanEval/53",
+        "prompt": "def hamming_distance(a, b):\n    '''Write a function that calculate the hamming distance between two positive integers. Return -1 if any of the two integers are negative.\n\nFor example:\n>>> hamming_distance(10, 15)\n2\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(10, 15) == 2\n    assert candidate(8, 0) == 1\n    assert candidate(0, 0) == 0\n    assert candidate(-1, 5) == -1\n    assert candidate(7, 7) == 0",
+        "entry_point": "hamming_distance"
+    },
+    {
+        "task_id": "CoopHumanEval/54",
+        "prompt": "def perfect_square_and_palindrome(n):\n    '''Write a function returns the first n numbers that are both a perfect square and a palindrome.\n\nFor example:\n>>> perfect_square_and_palindrome(6)\n[1, 4, 9, 121, 484, 10201]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(1) == [1]\n    assert candidate(4) == [1, 4, 9, 121]\n    assert candidate(6) == [1, 4, 9, 121, 484, 10201]\n    assert candidate(0) == []\n    assert candidate(8) == [1, 4, 9, 121, 484, 10201, 12321, 14641]",
+        "entry_point": "perfect_square_and_palindrome"
+    },
+    {
+        "task_id": "CoopHumanEval/55",
+        "prompt": "def identify_cubic_number_in_a_list(numbers):\n    '''Write a function that returns the cubic number in a given integer list.\n\nFor example:\n>>> identify_cubic_number_in_a_list([1, 8, 27, 64, 125])\n[1, 8, 27, 64, 125]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([1, 8, 27]) == [1, 8, 27]\n    assert candidate([1, 8, 27, 64, 125]) == [1, 8, 27, 64, 125]\n    assert candidate([1, 3, 26, 66, 129]) == [1]\n    assert candidate([]) == []\n    assert candidate([0]) == [0]",
+        "entry_point": "identify_cubic_number_in_a_list"
+    },
+    {
+        "task_id": "CoopHumanEval/56",
+        "prompt": "def hex_prime_float_number(hex_numbers):\n    '''Write a function to find hexadecimal floating-point numbers whose decimal part contains only prime digits in hexadecimal, given a list of hexadecimal floating-point numbers.\n\nFor example:\n>>> hex_prime_float_number(['8.4A6', 'E.89F', '1.B'])\n['1.B']\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(['4.237', 'A.B5D', 'F.123', 'C.2B7', '3.D52']) == ['4.237', 'A.B5D', 'C.2B7', '3.D52']\n    assert candidate(['8.4A6', 'E.89F', '1.B']) == ['1.B']\n    assert candidate(['A.235D', 'F.1234', 'C.BD7']) == ['A.235D', 'C.BD7']\n    assert candidate([]) == []",
+        "entry_point": "hex_prime_float_number"
+    },
+    {
+        "task_id": "CoopHumanEval/57",
+        "prompt": "def index_factors(arr):\n    '''Write a function to return numbers from an integer array where either the number is a multiple of its index OR the index is a multiple of the number. The first element (index 0) is always returned since 0 is a multiple of any number. If a number is 0, always return it.\n\nFor example:\n>>> index_factors([10, 3, 8, 2])\n[10, 3, 8]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([5, 2, 6, 4, -4, 10, 3, 8, -2]) == [5, 2, 6, -4, 10, 3, -2]\n    assert candidate([10, 3, 8, 2]) == [10, 3, 8]\n    assert candidate([7, 1, 4, 6, 12]) == [7, 1, 4, 6, 12]\n    assert candidate([0, 0, 0]) == [0, 0, 0]\n    assert candidate([-3, -6, 9, -12]) == [-3, -6, -12]",
+        "entry_point": "index_factors"
+    },
+    {
+        "task_id": "CoopHumanEval/58",
+        "prompt": "def is_square_prime(n):\n    '''Write a function to determine if a positive integer n is the square of a prime integer number. Return True if n = p² where p is a prime number, False otherwise.\n\nFor example:\n>>> is_square_prime(121)\nTrue\n>>> is_square_prime(36)\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(4) == True\n    assert candidate(9) == True\n    assert candidate(16) == False\n    assert candidate(121) == True\n    assert candidate(64) == False\n    assert candidate(15) == False",
+        "entry_point": "is_square_prime"
+    },
+    {
+        "task_id": "CoopHumanEval/59",
+        "prompt": "def calculate_rectangle_area(dimensions):\n    '''Write a function to calculate area given a list of 1 or 2 positive numbers. If the list has 1 element, treat it as the side length of a square and return the area. If the list has 2 elements, treat them as length and width of a rectangle and return the area. Return -1 for invalid input (empty list, more than 2 elements, or non-positive numbers).\n\nFor example:\n>>> calculate_rectangle_area([5])\n25\n>>> calculate_rectangle_area([3, 5])\n15\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([5]) == 25\n    assert candidate([3]) == 9\n    assert candidate([4, 6]) == 24\n    assert candidate([2, 8]) == 16\n    assert candidate([10, 10]) == 100",
+        "entry_point": "calculate_rectangle_area"
+    },
+    {
+        "task_id": "CoopHumanEval/60",
+        "prompt": "def is_pythagorean_hypotenuse(c):\n    '''Write a function to determine if an integer can be the hypotenuse of a right triangle with integer sides. A number c can be a hypotenuse if there exist positive integers a and b such that a² + b² = c².\n\nFor example:\n>>> is_pythagorean_hypotenuse(13)\nTrue\n>>> is_pythagorean_hypotenuse(6)\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(5) == True\n    assert candidate(13) == True\n    assert candidate(6) == False\n    assert candidate(25) == True\n    assert candidate(0) == False",
+        "entry_point": "is_pythagorean_hypotenuse"
+    },
+    {
+        "task_id": "CoopHumanEval/61",
+        "prompt": "def is_valid_historical_datetime(datetime_str):\n    '''Write a function to determine if a string of digits represents a valid historical moment in time. The valid time string should have length 12.\n\nFor example:\n>>> is_valid_historical_datetime('200002291230')\nTrue\n>>> is_valid_historical_datetime('200203322359')\nFalse\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('200203142359') == True\n    assert candidate('020003151233') == True\n    assert candidate('200213142359') == False\n    assert candidate('200203322359') == False\n    assert candidate('200002291230') == True",
+        "entry_point": "is_valid_historical_datetime"
+    },
+    {
+        "task_id": "CoopHumanEval/62",
+        "prompt": "def unique_prime_factors(n):\n    '''Write a function that takes a positive integer and returns a list of all its unique prime factors in ascending order, without duplicates. \n\nFor example:\n>>> unique_prime_factors(49)\n[7]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(12) == [2, 3]\n    assert candidate(15) == [3, 5]\n    assert candidate(7) == [7]\n    assert candidate(48) == [2, 3]\n    assert candidate(30) == [2, 3, 5]",
+        "entry_point": "unique_prime_factors"
+    },
+    {
+        "task_id": "CoopHumanEval/63",
+        "prompt": "def digital_root(n):\n    '''Write a function that calculates the digital root of a positive integer. The digital root is obtained by repeatedly summing the digits until a single digit is obtained. \n\nFor example:\n>>> digital_root(82)\n1\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(123) == 6\n    assert candidate(999) == 9\n    assert candidate(38) == 2\n    assert candidate(91) == 1\n    assert candidate(10) == 1",
+        "entry_point": "digital_root"
+    },
+    {
+        "task_id": "CoopHumanEval/64",
+        "prompt": "def sum_with_mirror(n):\n    '''Write a function that takes a positive integer and calculate the sum of the number and its mirror number (digits reversed). \n\nFor example:\n>>> sum_with_mirror(111)\n222\n>>> sum_with_mirror(56)\n121\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(29) == 121\n    assert candidate(23) == 55\n    assert candidate(123) == 444\n    assert candidate(169) == 1130\n    assert candidate(98543) == 133132",
+        "entry_point": "sum_with_mirror"
+    },
+    {
+        "task_id": "CoopHumanEval/65",
+        "prompt": "def are_coprime(a, b):\n    '''Write a function that takes two positive integers and determines if they are coprime. Two numbers are coprime if their greatest common divisor is 1.\n\nFor example:\n>>> are_coprime(8, 21)\nTrue\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(8, 15) == True\n    assert candidate(12, 18) == False\n    assert candidate(7, 11) == True\n    assert candidate(14, 21) == False\n    assert candidate(9, 16) == True",
+        "entry_point": "are_coprime"
+    },
+    {
+        "task_id": "CoopHumanEval/66",
+        "prompt": "def nino_number_mirror(n):\n    '''A nino number is a 4-digit integer number whose first and third digit are same; and second and forth digit are different. Write a function to check whether a number is a nino number. If yes, return its mirror number (digits reversed); else return 0.\n\nFor example:\n>>> nino_number_mirror(1001)\n0\n>>> nino_number_mirror(1010)\n0\n>>> nino_number_mirror(1014)\n4101\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(1314) == 4131\n    assert candidate(5213) == 0\n    assert candidate(1580) == 0\n    assert candidate(4641) == 1464\n    assert candidate(2025) == 5202",
+        "entry_point": "nino_number_mirror"
+    },
+    {
+        "task_id": "CoopHumanEval/67",
+        "prompt": "def compare_areas(shapes):\n    '''Write a function that takes a list of two arrays. The first array contains one number (side length of a square), the second array contains two numbers (length and width of a rectangle). Return the array that represents the shape with the larger area.\n\nFor example:\n>>> compare_areas([[8], [7, 9]])\n[[8]]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[3], [2, 4]]) == [[3]]\n    assert candidate([[2], [3, 4]]) == [[3, 4]]\n    assert candidate([[5], [4, 6]]) == [[5]]\n    assert candidate([[1], [1, 2]]) == [[1, 2]]\n    assert candidate([[4], [3, 5]]) == [[4]]",
+        "entry_point": "compare_areas"
+    },
+    {
+        "task_id": "CoopHumanEval/68",
+        "prompt": "def compare_volumes(shapes):\n    '''Write a function that takes a list of two arrays. The first array contains one number (side length of a cube), the second array contains three numbers (length, width, and height of a rectangular prism). Return the array that represents the shape with the larger volume.\n\nFor example:\n>>> compare_volumes([[4], [2, 3, 11]])\n[2, 3, 11]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([[3], [2, 4, 5]]) == [2, 4, 5]\n    assert candidate([[4], [3, 3, 4]]) == [4]\n    assert candidate([[2], [1, 2, 3]]) == [2]\n    assert candidate([[5], [4, 4, 7]]) == [5]\n    assert candidate([[3], [2, 3, 6]]) == [2, 3, 6]",
+        "entry_point": "compare_volumes"
+    },
+    {
+        "task_id": "CoopHumanEval/69",
+        "prompt": "def even_string_case(n, s):\n    '''Write a function that takes a positive integer and a string. If the integer is an even number, return the string in all uppercase. If the integer is an odd number, return the string in all lowercase.\n\nFor example:\n>>> even_string_case(7, 'Hello Kitty')\n'hello kitty'\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(7, 'Hello World') == 'hello world'\n    assert candidate(4, 'Hello World') == 'HELLO WORLD'\n    assert candidate(12, 'Python Programming') == 'PYTHON PROGRAMMING'\n    assert candidate(15, 'Python Programming') == 'python programming'\n    assert candidate(2, 'Test String') == 'TEST STRING'",
+        "entry_point": "even_string_case"
+    },
+    {
+        "task_id": "CoopHumanEval/70",
+        "prompt": "def calculate_rectangle_perimeter(dimensions):\n    '''Write a function to calculate perimeter given a list of 1 or 2 positive numbers. If the list has 1 element, treat it as the side length of a square and return the perimeter. If the list has 2 elements, treat them as length and width of a rectangle and return the perimeter. Return -1 for invalid input (empty list, more than 2 elements, or non-positive numbers).\n\nFor example:\n>>> calculate_rectangle_perimeter([15])\n60\n>>> calculate_rectangle_perimeter([14, 17])\n62\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([5]) == 20\n    assert candidate([3]) == 12\n    assert candidate([4, 6]) == 20\n    assert candidate([2, 8]) == 20\n    assert candidate([]) == -1",
+        "entry_point": "calculate_rectangle_perimeter"
+    },
+    {
+        "task_id": "CoopHumanEval/71",
+        "prompt": "def prime_string_slice(n, s):\n    '''Write a function that takes a positive integer n and a string. If n is a prime number, return the first n characters of the string. If n is not a prime number, return the last n characters of the string. If n is greater than or equal to the length of the string, return the entire string.\n\nFor example:\n>>> prime_string_slice(4, 'abcdefg')\n'defg'\n>>> prime_string_slice(3, 'abcdefg')\n'abc'\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3, 'Hello World') == 'Hel'\n    assert candidate(4, 'Hello World') == 'orld'\n    assert candidate(7, 'Python') == 'Python'\n    assert candidate(6, 'Python') == 'Python'\n    assert candidate(2, 'Programming') == 'Pr'",
+        "entry_point": "prime_string_slice"
+    },
+    {
+        "task_id": "CoopHumanEval/72",
+        "prompt": "def solve_pen_problem(budget, total_items):\n    '''A stationery store sells two types of writing instruments: Pencils $2 each; Pens $5 each\nWrite a function that calculates how many pencils and pens to buy given: budget and total_items\nThe function should return a tuple (pencils, pens) representing the quantities of each type. If no valid solution exists, return None.\n\nFor example:\n>>> solve_pen_problem(100, 50)\n(50, 0)\n>>> solve_pen_problem(100, 20)\n(0, 20)\n>>> solve_pen_problem(7, 2)\n(1, 1)\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(120, 60) == (60, 0)\n    assert candidate(80, 16) == (0, 16)\n    assert candidate(45, 15) == (10, 5)\n    assert candidate(35, 10) == (5, 5)\n    assert candidate(386, 121) == (73, 48)\n",
+        "entry_point": "solve_pen_problem"
+    },
+    {
+        "task_id": "CoopHumanEval/73",
+        "prompt": "def vowel_to_binary(s):\n    '''Write a function to replace all vowels (a, e, i, o, u) in a string with 1 and all non-vowels with 0.\n\nFor example:\n>>> vowel_to_binary('hello')\n'01001'\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('hello') == '01001'\n    assert candidate('programming') == '00100100100'\n    assert candidate('aeiou') == '11111'\n    assert candidate('xyz') == '000'\n    assert candidate('cat') == '010'\n",
+        "entry_point": "vowel_to_binary"
+    },
+    {
+        "task_id": "CoopHumanEval/74",
+        "prompt": "def fibonacci_check(n):\n    '''Write a function to check if a number is a Fibonacci number. If yes, return the previous Fibonacci number; otherwise, return the nearest Fibonacci number.\n\nFor example:\n>>> fibonacci_check(5)\n3\n>>> fibonacci_check(13)\n8\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(5) == 3\n    assert candidate(6) == 5\n    assert candidate(8) == 5\n    assert candidate(13) == 8\n    assert candidate(21) == 13\n    assert candidate(10) == 8\n    assert candidate(1) == 0",
+        "entry_point": "fibonacci_check"
+    },
+    {
+        "task_id": "CoopHumanEval/75",
+        "prompt": "def arithmetic_sequence_next(lst):\n    '''An arithmetic sequence is a sequence of numbers where the difference between any two successive terms is constant. Write a function to check if a list is an arithmetic sequence. If yes, return the next number; otherwise, return 0.\n\nFor example:\n>>> arithmetic_sequence_next([1, 3, 5, 7])\n9\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([9, 18, 27, 36, 45, 54]) == 63\n    assert candidate([1, 2, 4, 7]) == 0\n    assert candidate([5, 10, 15]) == 20\n    assert candidate([1, 1, 1, 1]) == 1\n    assert candidate([10, 7, 4, 1]) == -2",
+        "entry_point": "arithmetic_sequence_next"
+    },
+    {
+        "task_id": "CoopHumanEval/76",
+        "prompt": "def geometric_sequence_sum(lst):\n    '''Write a Python function to check if a list is a geometric sequence. If so, return the sum of all elements; otherwise, return 0.\n\nFor example:\n>>> geometric_sequence_sum([2, 4, 8, 16])\n30\n>>> geometric_sequence_sum([2, 4, 7, 14])\n0\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([2, 4, 8, 16]) == 30\n    assert candidate([1, 3, 9, 27]) == 40\n    assert candidate([2, 4, 7, 14]) == 0\n    assert candidate([5, 10, 20]) == 35\n    assert candidate([4, 4, 4]) == 12",
+        "entry_point": "geometric_sequence_sum"
+    },
+    {
+        "task_id": "CoopHumanEval/77",
+        "prompt": "def filter_powers_of_seven(lst):\n    '''Write a function to remove all numbers from the list that are not powers of 7.\n\nFor example:\n>>> filter_powers_of_seven([1, 7, 14, 49, 50, 343])\n[1, 7, 49, 343]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate([7, 14, 49, 50, 343]) == [7, 49, 343]\n    assert candidate([7, 14, 21, 49, 343, 2401]) == [7, 49, 343, 2401]\n    assert candidate([2, 3, 5, 8, 10]) == []\n    assert candidate([7, 16807]) == [7, 16807]\n    assert candidate([0, 1, 7]) == [1, 7]",
+        "entry_point": "filter_powers_of_seven"
+    },
+    {
+        "task_id": "CoopHumanEval/78",
+        "prompt": "def valid_triangle_sides(a, b, lst):\n    '''Given two integers as sides and a list of numbers, write a function to determine which sides from the list can form a valid triangle as the third side.\n\nFor example:\n>>> valid_triangle_sides(3, 4, [1, 2, 5, 6, 7, 8])\n[2, 5, 6]\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3, 4, [1, 2, 5, 6, 7, 8]) == [2, 5, 6]\n    assert candidate(5, 5, [1, 2, 3, 8, 9, 10]) == [1, 2, 3, 8, 9]\n    assert candidate(1, 1, [1, 21, 39]) == [1]\n    assert candidate(2, 3, [1, 4, 5, 6]) == [4]\n    assert candidate(10, 10, [1, 5, 10, 15, 19, 20]) == [1, 5, 10, 15, 19]",
+        "entry_point": "valid_triangle_sides"
+    },
+    {
+        "task_id": "CoopHumanEval/79",
+        "prompt": "def chicken_rabbit_problem(heads, legs):\n    '''Write a Python function to calcualte chicken and rabbit problem, where every chicken has 2 legs and every rabbit has 4 legs. First check if it's a valid problem (legs must be even non-negative integers). If invalid, return (0, 0); if valid, return the number of chickens and rabbits.\n\nFor example:\n>>> chicken_rabbit_problem(10, 28)\n(6, 4)\n>>> chicken_rabbit_problem(10, 25)\n(0, 0)\n>>> chicken_rabbit_problem(8, 20)\n(6, 2)\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(10, 28) == (6, 4)\n    assert candidate(5, 12) == (4, 1)\n    assert candidate(10, 25) == (0, 0)\n    assert candidate(10, 26) == (7, 3)\n    assert candidate(10, 40) == (0, 10)\n",
+        "entry_point": "chicken_rabbit_problem"
+    },
+    {
+        "task_id": "CoopHumanEval/80",
+        "prompt": "def same_sign_operation(a, b):\n    '''Write a function to check if two numbers have the same sign. If yes, multiply them; otherwise, add them.\n\nFor example:\n>>> same_sign_operation(3, 5)\n15\n>>> same_sign_operation(-2, -4)\n8\n>>> same_sign_operation(3, -5)\n-2\n'''\n",
+        "test": "def check(candidate):\n    assert candidate(3, 6) == 18\n    assert candidate(-4, -4) == 16\n    assert candidate(-3, 5) == 2\n    assert candidate(-2, 4) == 2\n    assert candidate(-100, 4) == -96\n",
+        "entry_point": "same_sign_operation"
+    },
+    {
+        "task_id": "CoopHumanEval/81",
+        "prompt": "def case_converter(s):\n    '''Convert string to camelCase if length < 10, otherwise to snake_case.\ncamelCase: first word lowercase, subsequent words capitalized, no spaces/underscores\nsnake_case: all lowercase with underscores between words\n\nFor example:\n>>> case_converter('my_var')  # length 6 < 10\n'myVar'\n>>> case_converter('myVariable')  # length 10 >= 10\n'my_variable'\n>>> case_converter('getUserInfo')  # length 11 >= 10\n'get_user_info'\n'''\n",
+        "test": "def check(candidate):\n    assert candidate('var_name') == 'varName'\n    assert candidate('calculate_total') == 'calculate_total'\n    assert candidate('getUserInfo') == 'get_user_info'\n    assert candidate('bad_habit') == 'badHabit'\n    assert candidate('winOrGoHome') == 'win_or_go_home'\n",
+        "entry_point": "case_converter"
+    }
+]

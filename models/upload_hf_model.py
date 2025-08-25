@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""
+Script to upload trained MAGRPO agents to Hugging Face Hub
+"""
+
+import os
+
+from huggingface_hub import HfApi, create_repo
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def upload_agent_to_hf(
+    local_agent_path: str,
+    repo_name: str,
+    username: str,
+    token: str = None,
+    private: bool = False,
+    description: str = None,
+):
+    """
+    Upload a trained agent to Hugging Face Hub
+
+    Args:
+        local_agent_path: Path to the local agent folder
+        repo_name: Name for the repository on Hugging Face
+        username: Your Hugging Face username
+        token: Your Hugging Face token (optional if logged in via CLI)
+        private: Whether to make the repository private
+        description: Description for the model
+    """
+
+    print(f"🚀 Uploading {local_agent_path} to {username}/{repo_name}")
+
+    # Check if local path exists
+    if not os.path.exists(local_agent_path):
+        print(f"❌ Local path does not exist: {local_agent_path}")
+        return False
+
+    # List files in the agent directory
+    files = os.listdir(local_agent_path)
+    print(f"📁 Files to upload: {files}")
+
+    try:
+        # Initialize Hugging Face API
+        api = HfApi(token=token)
+
+        # Create repository
+        full_repo_name = f"{username}/{repo_name}"
+        print(f"📦 Creating repository: {full_repo_name}")
+
+        try:
+            create_repo(
+                repo_id=full_repo_name,
+                token=token,
+                private=private,
+                exist_ok=True,  # Don't fail if repo already exists
+                repo_type="model",
+            )
+            print(f"✅ Repository created/verified: {full_repo_name}")
+        except Exception as e:
+            print(f"⚠️  Repository creation warning: {e}")
+            print("🔄 Continuing with upload...")
+
+        # Test load the model first to ensure it's valid
+        print("🧪 Testing model loading...")
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(local_agent_path)
+            model = AutoModelForCausalLM.from_pretrained(local_agent_path)
+            print("✅ Model loads successfully")
+        except Exception as e:
+            print(f"❌ Model loading failed: {e}")
+            return False
+
+        # Upload the model
+        print("📤 Uploading model files...")
+        api.upload_folder(
+            folder_path=local_agent_path,
+            repo_id=full_repo_name,
+            token=token,
+            commit_message=f"Upload {repo_name}",
+        )
+
+        # Create/update README
+        readme_content = ""
+
+        # Upload README
+        try:
+            api.upload_file(
+                path_or_fileobj=readme_content.encode(),
+                path_in_repo="README.md",
+                repo_id=full_repo_name,
+                token=token,
+                commit_message="Add model README",
+            )
+            print("✅ README uploaded")
+        except Exception as e:
+            print(f"⚠️  README upload warning: {e}")
+
+        print(f"🎉 Successfully uploaded to: https://huggingface.co/{full_repo_name}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Upload failed: {e}")
+        return False
+
+
+def main():
+    """Main function to upload both agents"""
+
+    # Configuration
+    BASE_MODEL_DIR = "saved_models/"
+
+    # Agent paths
+    agent_0_path = os.path.join(BASE_MODEL_DIR, "agent_0")
+    agent_1_path = os.path.join(BASE_MODEL_DIR, "agent_1")
+
+    # Repository names
+    aux_repo_name = "My-Agent-0"
+    main_repo_name = "My-Agent-1"
+
+    # Get user inputs
+    print("📋 Configuration:")
+    print(f"  Agent 0 (Aux): {agent_0_path} -> {aux_repo_name}")
+    print(f"  Agent 1 (Main): {agent_1_path} -> {main_repo_name}")
+
+    username = input("\n🔑 Enter your Hugging Face username: ").strip()
+
+    # Check if user is logged in via CLI
+    try:
+        from huggingface_hub import whoami
+
+        current_user = whoami()
+        print(f"✅ Logged in as: {current_user['name']}")
+        token = None  # Use CLI token
+    except Exception:
+        print("⚠️  Not logged in via CLI")
+        token = input(
+            "🔑 Enter your Hugging Face token (or press Enter to skip): "
+        ).strip()
+        if not token:
+            token = None
+
+    # Ask about privacy
+    private = input("🔒 Make repositories private? (y/N): ").strip().lower() == "y"
+
+    # Descriptions
+    aux_description = """
+## Agent Role
+This is the **Auxiliary Function Generator** agent that creates helper functions to assist in solving coding problems. It works in collaboration with the main function generator to provide a complete solution.
+"""
+
+    main_description = """
+## Agent Role  
+This is the **Main Function Generator** agent that creates the primary solution functions. It can utilize auxiliary functions generated by the companion auxiliary agent to solve coding problems more effectively.
+"""
+
+    print(f"\n📤 Starting uploads...")
+
+    # Upload Agent 0 (Aux)
+    success_aux = upload_agent_to_hf(
+        local_agent_path=agent_0_path,
+        repo_name=aux_repo_name,
+        username=username,
+        token=token,
+        private=private,
+        description=aux_description,
+    )
+
+    print("\n" + "=" * 50)
+
+    # Upload Agent 1 (Main)
+    success_main = upload_agent_to_hf(
+        local_agent_path=agent_1_path,
+        repo_name=main_repo_name,
+        username=username,
+        token=token,
+        private=private,
+        description=main_description,
+    )
+
+    if success_aux and success_main:
+        print("\n🎉 Both agents successfully uploaded to Hugging Face!")
+        print(f"🔗 Aux Agent: https://huggingface.co/{username}/{aux_repo_name}")
+        print(f"🔗 Main Agent: https://huggingface.co/{username}/{main_repo_name}")
+    else:
+        print("\n⚠️  Some uploads failed. Check the error messages above.")
+
+
+if __name__ == "__main__":
+    main()
