@@ -1,4 +1,4 @@
-# Experiments
+# LLM Collaboration with Multi-Agent Reinforcement Learning
 
 This directory contains training scripts and configurations for paper _"LLM Collaboration with Multi-Agent Reinforcement Learning"_.
 
