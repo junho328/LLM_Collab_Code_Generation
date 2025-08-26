@@ -9,7 +9,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Import utilities (assuming these are in your project structure)
-from experiments.rewards.code_utils import cleanup_code, extract_specific_function
+from rewards.code_utils import cleanup_code, extract_specific_function
 
 
 def extract_function_params_from_prompt(prompt_text):

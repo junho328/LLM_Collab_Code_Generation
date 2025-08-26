@@ -16,11 +16,11 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Import the logger functions
-from experiments.loggers.code_logger import (
+from loggers.code_logger import (
     aggregate_code_metrics_for_logging,
     code_reward_logger,
 )
-from experiments.loggers.mt_code_logger import (
+from loggers.mt_code_logger import (
     aggregate_mt_humaneval_metrics_for_logging,
     mt_humaneval_logger,
 )
@@ -499,7 +499,7 @@ def {entry_point}({params_str}):
                         generation_data["output_tokens"].append(0)
                     else:
                         # Turn 2: Generation with expert feedback
-                        from experiments.rewards.code_utils import (
+                        from rewards.code_utils import (
                             concatenate_functions,
                             extract_imports_from_prompt,
                         )

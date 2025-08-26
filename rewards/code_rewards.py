@@ -2,7 +2,7 @@ import re
 import signal
 from typing import List
 
-from experiments.rewards.code_utils import (
+from rewards.code_utils import (
     TimeoutException,
     check_aux_call_without_assignment,
     check_aux_function_usage,

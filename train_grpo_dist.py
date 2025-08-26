@@ -20,9 +20,9 @@ from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.rewards.arxiv_rewards import arxiv_combined_reward
-from experiments.rewards.code_rewards import execution_reward_humaneval_aux
-from experiments.rewards.tldr_rewards import tldr_combined_reward
+from rewards.arxiv_rewards import arxiv_combined_reward
+from rewards.code_rewards import execution_reward_humaneval_aux
+from rewards.tldr_rewards import tldr_combined_reward
 from comlrl.rewards.processor import RewardProcessors
 
 # [dist]

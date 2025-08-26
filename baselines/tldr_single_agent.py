@@ -9,7 +9,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.loggers.tldr_logger import (
+from loggers.tldr_logger import (
     aggregate_tldr_metrics_for_logging,
     tldr_combined_reward_logger,
 )

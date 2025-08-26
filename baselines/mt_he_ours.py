@@ -16,11 +16,11 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Import the logger functions
-from experiments.loggers.code_logger import (
+from loggers.code_logger import (
     aggregate_code_metrics_for_logging,
     code_reward_logger,
 )
-from experiments.loggers.mt_code_logger import (
+from loggers.mt_code_logger import (
     aggregate_mt_humaneval_metrics_for_logging,
     mt_humaneval_logger,
 )

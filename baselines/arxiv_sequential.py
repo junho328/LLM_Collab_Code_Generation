@@ -9,7 +9,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.loggers.arxiv_logger import (
+from loggers.arxiv_logger import (
     aggregate_arxiv_metrics_for_logging,
     arxiv_combined_reward_logger,
 )

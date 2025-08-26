@@ -12,7 +12,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.rewards.code_utils import (
+from rewards.code_utils import (
     TimeoutException,
     check_aux_call_without_assignment,
     check_aux_function_usage,

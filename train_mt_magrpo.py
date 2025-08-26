@@ -17,13 +17,13 @@ from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.loggers.mt_code_logger import (
+from loggers.mt_code_logger import (
     aggregate_mt_humaneval_metrics_for_logging,
     mt_humaneval_logger,
 )
-from experiments.rewards.arxiv_rewards import arxiv_combined_reward
-from experiments.rewards.code_rewards import execution_reward_humaneval_aux
-from experiments.rewards.tldr_rewards import tldr_combined_reward
+from rewards.arxiv_rewards import arxiv_combined_reward
+from rewards.code_rewards import execution_reward_humaneval_aux
+from rewards.tldr_rewards import tldr_combined_reward
 from comlrl.rewards.processor import RewardProcessors
 from comlrl.trainers.mt_magrpo import MTMAGRPOConfig, MTMAGRPOTrainer
 

@@ -17,23 +17,23 @@ from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experiments.loggers.arxiv_logger import (
+from loggers.arxiv_logger import (
     aggregate_arxiv_metrics_for_logging,
     arxiv_combined_reward_logger,
 )
 
 # Import loggers for different datasets
-from experiments.loggers.code_logger import (
+from loggers.code_logger import (
     aggregate_code_metrics_for_logging,
     code_reward_logger,
 )
-from experiments.loggers.tldr_logger import (
+from loggers.tldr_logger import (
     aggregate_tldr_metrics_for_logging,
     tldr_combined_reward_logger,
 )
-from experiments.rewards.arxiv_rewards import arxiv_combined_reward
-from experiments.rewards.code_rewards import execution_reward_humaneval_aux
-from experiments.rewards.tldr_rewards import tldr_combined_reward
+from rewards.arxiv_rewards import arxiv_combined_reward
+from rewards.code_rewards import execution_reward_humaneval_aux
+from rewards.tldr_rewards import tldr_combined_reward
 from comlrl.rewards.processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig, MAGRPOTrainer
 
