@@ -547,6 +547,8 @@ def main():
         "eval_dataset": eval_dataset,
         "tokenizer": tokenizer,
         "wandb_config": wandb_config,
+        "eval_logger": mt_humaneval_logger,
+        "eval_aggregator": aggregate_mt_humaneval_metrics_for_logging,
     }
 
     if reward_processor is not None:
