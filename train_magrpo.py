@@ -34,7 +34,8 @@ from loggers.tldr_logger import (
 from rewards.arxiv_rewards import arxiv_combined_reward
 from rewards.code_rewards import execution_reward_humaneval_aux
 from rewards.tldr_rewards import tldr_combined_reward
-from comlrl.rewards.processor import RewardProcessors
+# from comlrl.rewards.processor import RewardProcessors
+from comlrl.utils.reward_processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig, MAGRPOTrainer
 
 
