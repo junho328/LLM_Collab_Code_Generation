@@ -1,6 +1,7 @@
 """
-Generic training script for MAGRPO that supports multiple datasets and configurations.
-Uses YAML configuration files to define all parameters.
+Unified training script for MAGRPO that supports both single-turn and multi-turn training.
+The training mode is determined by the num_turns parameter in the config file.
+Supports multiple datasets and configurations via YAML files.
 """
 
 import argparse
@@ -17,12 +18,11 @@ from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# Import loggers for different datasets
 from loggers.arxiv_logger import (
     aggregate_arxiv_metrics_for_logging,
     arxiv_combined_reward_logger,
 )
-
-# Import loggers for different datasets
 from loggers.code_logger import (
     aggregate_code_metrics_for_logging,
     code_reward_logger,
@@ -31,10 +31,14 @@ from loggers.tldr_logger import (
     aggregate_tldr_metrics_for_logging,
     tldr_combined_reward_logger,
 )
+from loggers.mt_code_logger import (
+    aggregate_mt_humaneval_metrics_for_logging,
+    mt_humaneval_logger,
+)
+
 from rewards.arxiv_rewards import arxiv_combined_reward
 from rewards.code_rewards import execution_reward_humaneval_aux
 from rewards.tldr_rewards import tldr_combined_reward
-# from comlrl.rewards.processor import RewardProcessors
 from comlrl.utils.reward_processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig, MAGRPOTrainer
 
@@ -49,8 +53,13 @@ def extract_function_params_from_prompt(prompt_text):
     return []
 
 
-def aux_function_formatter(example: Dict[str, Any]) -> str:
-    """Formatter for the auxiliary function generator (Agent 1) for code tasks."""
+def aux_function_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
+    """
+    Formatter for the auxiliary function generator (Agent 1) for code tasks.
+    Optionally includes expert feedback for multi-turn training.
+    """
     prompt = example.get("prompt", "")
     entry_point = example.get("entry_point", "")
 
@@ -78,11 +87,19 @@ Your output should follow this format:
 
 def aux(...):\n # your function code here\nreturn result\n"""
 
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
+
     return prompt_text
 
 
-def main_function_formatter(example: Dict[str, Any]) -> str:
-    """Formatter for the main function generator (Agent 2) for code tasks."""
+def main_function_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
+    """
+    Formatter for the main function generator (Agent 2) for code tasks.
+    Optionally includes expert feedback for multi-turn training.
+    """
     prompt = example.get("prompt", "")
     entry_point = example.get("entry_point", "")
 
@@ -113,10 +130,15 @@ Your output should follow this format:
 
 def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
 
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
+
     return prompt_text
 
 
-def background_agent_formatter(example: Dict[str, Any]) -> str:
+def background_agent_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
     """Formatter for the background agent (Agent 1) for ArXiv dataset."""
     abstract = example.get("abstract_text", "")
 
@@ -134,10 +156,15 @@ IMPORTANT INSTRUCTIONS:
 - Avoid repeating methodology and implications content
 """
 
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
+
     return prompt_text
 
 
-def complementary_agent_formatter(example: Dict[str, Any]) -> str:
+def complementary_agent_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
     """Formatter for the complementary agent (Agent 2) for ArXiv dataset."""
     abstract = example.get("abstract_text", "")
 
@@ -155,10 +182,15 @@ IMPORTANT INSTRUCTIONS:
 - Avoid repeating background and motivation content
 """
 
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
+
     return prompt_text
 
 
-def summary_agent_formatter(example: Dict[str, Any]) -> str:
+def summary_agent_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
     """Formatter for the summary agent (Agent 1) for TLDR dataset."""
     prompt = example.get("prompt", "")
 
@@ -175,10 +207,15 @@ IMPORTANT INSTRUCTIONS:
 - Be factual and informative
 """
 
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
+
     return prompt_text
 
 
-def elaboration_agent_formatter(example: Dict[str, Any]) -> str:
+def elaboration_agent_formatter(
+    example: Dict[str, Any], expert_feedback: Optional[str] = None
+) -> str:
     """Formatter for the elaboration agent (Agent 2) for TLDR dataset."""
     prompt = example.get("prompt", "")
 
@@ -194,6 +231,9 @@ IMPORTANT INSTRUCTIONS:
 - Use more unique words
 - Use some transition words to improve flow
 """
+
+    if expert_feedback is not None:
+        prompt_text += f"\n\nHere is the feedback from an expert:\n{expert_feedback}"
 
     return prompt_text
 
@@ -216,11 +256,19 @@ def get_formatters(dataset_type: str):
     )
 
 
-def get_logger_and_aggregator(dataset_type: str):
-    """Get the appropriate logger and aggregator functions based on dataset type."""
+def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
+    """
+    Get the appropriate logger and aggregator functions based on dataset type.
+    For multi-turn training with code datasets, use the multi-turn logger.
+    """
     if dataset_type is None:
         return None, None
 
+    # For multi-turn training with code datasets, use multi-turn logger
+    if is_multi_turn and dataset_type.lower() in ["humaneval", "coophumaneval"]:
+        return mt_humaneval_logger, aggregate_mt_humaneval_metrics_for_logging
+
+    # Standard single-turn loggers
     logger_map = {
         "humaneval": (code_reward_logger, aggregate_code_metrics_for_logging),
         "coophumaneval": (code_reward_logger, aggregate_code_metrics_for_logging),
@@ -270,9 +318,9 @@ def get_reward_function(dataset_type: str):
 
 
 def main():
-    """Main function to run the experiment."""
+    """Main function to run the unified MAGRPO training."""
     parser = argparse.ArgumentParser(
-        description="Train MAGRPO with configurable dataset"
+        description="Train MAGRPO with configurable dataset (single-turn or multi-turn)"
     )
     add_config_args(parser)
 
@@ -288,6 +336,25 @@ def main():
         default=None,
         help="Base output directory (overrides config)",
     )
+    parser.add_argument(
+        "--num_epochs",
+        type=int,
+        default=None,
+        help="Number of training epochs (overrides config)",
+    )
+    parser.add_argument(
+        "--num_turns",
+        type=int,
+        default=None,
+        help="Number of turns for multi-turn training (overrides config)",
+    )
+    parser.add_argument(
+        "--turn_gradient_weights",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Turn gradient weights for multi-turn training (overrides config)",
+    )
 
     args = parser.parse_args()
 
@@ -300,10 +367,17 @@ def main():
         overrides = parse_overrides(args.override)
         config.update(overrides)
 
+    # Apply command-line overrides
     if args.model_name:
         config.update({"model_name": args.model_name})
     if args.output_base_dir:
         config.update({"output": {"base_dir": args.output_base_dir}})
+    if args.num_epochs is not None:
+        config.update({"magrpo": {"num_train_epochs": args.num_epochs}})
+    if args.num_turns is not None:
+        config.update({"magrpo": {"num_turns": args.num_turns}})
+    if args.turn_gradient_weights is not None:
+        config.update({"magrpo": {"turn_gradient_weights": args.turn_gradient_weights}})
 
     # Load model configuration
     model_config = config.get_model_config()
@@ -327,11 +401,38 @@ def main():
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
             )
         print(f"Dataset type not specified, inferred as: {dataset_type}")
+    
     train_split = config.get("dataset.train_split")
     eval_split = config.get("dataset.eval_split")
 
+    # Get MAGRPO configuration (works for both single and multi-turn)
+    magrpo_config = (
+        config.get_section("magrpo") if hasattr(config, "get_section") else {}
+    )
+    
+    # Check if this is multi-turn training
+    num_turns = magrpo_config.get("num_turns", 1)
+    is_multi_turn = num_turns > 1
+    
+    # Validate turn gradient weights for multi-turn
+    if is_multi_turn:
+        turn_weights = magrpo_config.get("turn_gradient_weights", [1.0] * num_turns)
+        if len(turn_weights) != num_turns:
+            raise ValueError(
+                f"turn_gradient_weights must have {num_turns} values, got {len(turn_weights)}"
+            )
+        print(f"Multi-turn training enabled: num_turns={num_turns}, weights={turn_weights}")
+    else:
+        print(f"Single-turn training: num_turns={num_turns}")
+
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
-    output_dir = os.path.join(output_base_dir, f"job_{slurm_job_id}")
+    
+    # Use different output directory prefix for multi-turn
+    if is_multi_turn:
+        output_dir = os.path.join(output_base_dir, f"mt_job_{slurm_job_id}")
+    else:
+        output_dir = os.path.join(output_base_dir, f"job_{slurm_job_id}")
+    
     os.makedirs(output_dir, exist_ok=True)
 
     if hasattr(config, "save"):
@@ -373,16 +474,13 @@ def main():
             f"Special tokens added: {model_config.special_tokens.get('additional_special_tokens', [])}"
         )
 
-    magrpo_config = (
-        config.get_section("magrpo") if hasattr(config, "get_section") else {}
-    )
-
     temperature = magrpo_config.get("temperature", model_config.temperature)
     top_p = magrpo_config.get("top_p", model_config.top_p)
-
+    
+    # Use unified MAGRPOConfig which handles both single-turn and multi-turn
     magrpo_args = MAGRPOConfig(
         output_dir=output_dir,
-        num_train_epochs=magrpo_config.get("num_train_epochs", 10),
+        num_train_epochs=magrpo_config.get("num_train_epochs", 10 if not is_multi_turn else 7),
         per_device_train_batch_size=magrpo_config.get("per_device_train_batch_size", 1),
         learning_rate=magrpo_config.get("learning_rate", 1e-5),
         logging_steps=magrpo_config.get("logging_steps", 50),
@@ -392,24 +490,35 @@ def main():
         temperature=temperature,
         top_p=top_p,
         beta=magrpo_config.get("beta", 0.02),
+        # Multi-turn parameters (automatically handled based on num_turns)
+        num_turns=num_turns,
+        turn_gradient_weights=magrpo_config.get("turn_gradient_weights", [1.0] * num_turns),
+        early_termination_weight=magrpo_config.get("early_termination_weight", 2.0),
+        expert_model=magrpo_config.get("expert_model", "claude-3-5-sonnet-20241022"),
     )
 
+    # Get appropriate formatters and functions based on dataset type and training mode
     formatters = get_formatters(dataset_type)
     reward_func = get_reward_function(dataset_type)
-    eval_logger, eval_aggregator = get_logger_and_aggregator(dataset_type)
+    eval_logger, eval_aggregator = get_logger_and_aggregator(dataset_type, is_multi_turn)
 
     wandb_section = (
         config.get_section("wandb") if hasattr(config, "get_section") else {}
     )
     model_short_name = model_name.split("/")[-1].lower()
-    wandb_name = wandb_section.get("name", f"magrpo_{dataset_type}")
+    
+    # Use different wandb name for multi-turn
+    if is_multi_turn:
+        wandb_name = wandb_section.get("name", f"mt_magrpo_{dataset_type}")
+    else:
+        wandb_name = wandb_section.get("name", f"magrpo_{dataset_type}")
 
     wandb_config = {
         "project": wandb_section.get("project", "mlrl"),
         "entity": wandb_section.get("entity", "nu-llpr"),
         "name": f"{wandb_name}_{model_short_name}",
         "dir": wandb_section.get("dir", "../../../projects/bepg/sliu30"),
-        "tags": wandb_section.get("tags", ["magrpo", dataset_type]),
+        "tags": wandb_section.get("tags", ["magrpo", dataset_type, f"turns_{num_turns}"]),
     }
 
     agents_config = (
@@ -449,6 +558,7 @@ def main():
     if reward_processor is not None:
         trainer_kwargs["reward_processors"] = reward_processor
 
+    # Use the unified MAGRPOTrainer which automatically handles single/multi-turn based on config
     trainer = MAGRPOTrainer(**trainer_kwargs)
 
     trainer.train()
