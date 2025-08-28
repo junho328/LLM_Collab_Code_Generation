@@ -38,6 +38,7 @@ magrpo:
   temperature: 0.8
   top_p: 0.95
   beta: 0.02
+  expert_model: "deepseek-coder"  # Expert model for feedback (optional for single-turn)
 
 # Multi-agent configuration
 agents:

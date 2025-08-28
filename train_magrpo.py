@@ -495,7 +495,7 @@ def main():
         num_turns=num_turns,
         turn_gradient_weights=magrpo_config.get("turn_gradient_weights", [1.0] * num_turns),
         early_termination_weight=magrpo_config.get("early_termination_weight", 2.0),
-        expert_model=magrpo_config.get("expert_model", "claude-3-5-sonnet-20241022"),
+        expert_model=magrpo_config.get("expert_model", "deepseek-coder"),
     )
 
     # Get appropriate formatters and functions based on dataset type and training mode
@@ -562,7 +562,7 @@ def main():
     # Add external_transition for code tasks if multi-turn is enabled
     if is_multi_turn and dataset_type and dataset_type.lower() in ["humaneval", "coophumaneval"]:
         # Create a wrapper that provides test and expert_model from batch_item and config
-        expert_model = magrpo_config.get("expert_model", "claude-3-5-sonnet-20241022")
+        expert_model = magrpo_config.get("expert_model", "deepseek-coder")
         
         def external_transition_wrapper(prompt, best_reward, aux_completion, main_completion, batch_item):
             """Wrapper that adds test and expert_model from batch_item and config."""

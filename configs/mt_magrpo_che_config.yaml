@@ -41,7 +41,7 @@ magrpo:
   beta: 0.02
   # Multi-turn specific parameters
   turn_gradient_weights: [1.2, 0.8]  # Weights for different turns
-  expert_model: "claude-3-5-sonnet-20241022"  # Expert model for feedback (Claude Sonnet for better performance)
+  expert_model: "deepseek-coder"  # Expert model for feedback
   early_termination_weight: 2.0
 
 # Multi-agent configuration
