@@ -236,7 +236,7 @@ def main():
     parser.add_argument(
         "--num_turns",
         type=int,
-        default=1,
+        default=None,
         help="Number of turns for multi-turn training (overrides config)",
     )
     parser.add_argument(
