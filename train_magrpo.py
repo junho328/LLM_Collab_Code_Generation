@@ -137,20 +137,30 @@ def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
     return prompt_text
 
 
-def get_formatters(dataset_type: str):
-    """Get the appropriate formatters based on dataset type."""
+def get_formatters(dataset_type: str, num_agents: int):
+    """Get a list of per-agent formatters based on dataset type and agent count.
+
+    For code tasks, use aux formatters for all agents except the last, which uses main.
+    """
     if dataset_type is None:
         raise ValueError(
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
         )
 
-    formatters_map = {
-        "humaneval": [aux_function_formatter, main_function_formatter],
-        "coophumaneval": [aux_function_formatter, main_function_formatter],
-    }
-    return formatters_map.get(
-        dataset_type.lower(), [aux_function_formatter, main_function_formatter]
-    )
+    if num_agents is None or num_agents < 1:
+        raise ValueError("num_agents must be >= 1")
+
+    if dataset_type.lower() in ["humaneval", "coophumaneval"]:
+        if num_agents == 1:
+            # Fallback: single agent uses main function formatter
+            return [main_function_formatter]
+        # For N agents: first N-1 are aux, last is main
+        return [aux_function_formatter] * (num_agents - 1) + [main_function_formatter]
+
+    # Default: treat as code tasks
+    if num_agents == 1:
+        return [main_function_formatter]
+    return [aux_function_formatter] * (num_agents - 1) + [main_function_formatter]
 
 
 def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
@@ -174,8 +184,12 @@ def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
     return logger_map.get(dataset_type.lower(), (None, None))
 
 
-def get_reward_function(dataset_type: str):
-    """Get the appropriate reward function based on dataset type."""
+def get_reward_function(dataset_type: str, num_agents: int):
+    """Get a reward function compatible with variable number of agents (single-turn).
+
+    For code tasks, map N-agent completions to the existing aux/main reward by
+    using the first agent as aux and the last agent as main.
+    """
     if dataset_type is None:
         raise ValueError(
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
@@ -183,8 +197,18 @@ def get_reward_function(dataset_type: str):
 
     if dataset_type.lower() in ["humaneval", "coophumaneval"]:
 
-        def reward_wrapper(completion1, completion2, batch_items=None, prompts=None):
-            batch_size = len(completion1)
+        def reward_wrapper(*agent_completions, batch_items=None, prompts=None):
+            # agent_completions: tuple of lists (one list per agent), each list contains strings per completion
+            if not agent_completions or len(agent_completions) < 1:
+                return []
+
+            # Choose aux from first agent if available when >=2, otherwise empty list
+            if len(agent_completions) >= 2:
+                completion1 = agent_completions[0]
+                completion2 = agent_completions[-1]
+            else:
+                completion1 = [""] * len(agent_completions[0])
+                completion2 = agent_completions[0]
 
             test_cases = []
             entry_points = []
@@ -194,8 +218,7 @@ def get_reward_function(dataset_type: str):
                 for item in batch_items:
                     test_cases.append(item["test"])
                     entry_points.append(item["entry_point"])
-                    original_prompts.append(item["prompt"])
-                    print(f"Using passed batch item: {item['entry_point']}")
+                    original_prompts.append(item.get("prompt", ""))
             else:
                 raise ValueError("batch_items must be provided for reward calculation")
 
@@ -204,8 +227,8 @@ def get_reward_function(dataset_type: str):
             )
 
         return reward_wrapper
-    else:
-        raise ValueError(f"Unknown dataset type: {dataset_type}")
+
+    raise ValueError(f"Unknown dataset type: {dataset_type}")
 
 
 def main():
@@ -381,7 +404,6 @@ def main():
         max_new_tokens=magrpo_config.get("max_new_tokens", 256),
         temperature=temperature,
         top_p=top_p,
-        beta=magrpo_config.get("beta", 0.02),
         # Multi-turn parameters (automatically handled based on num_turns)
         num_turns=num_turns,
         turn_gradient_weights=magrpo_config.get(
@@ -391,9 +413,9 @@ def main():
         # Note: expert_model is not included here - it's handled in the external_transition wrapper
     )
 
-    # Get appropriate formatters and functions based on dataset type and training mode
-    formatters = get_formatters(dataset_type)
-    reward_func = get_reward_function(dataset_type)
+    # Get appropriate formatters and functions based on dataset type, agent count, and training mode
+    formatters = get_formatters(dataset_type, config.get("magrpo.num_agents", 2))
+    reward_func = get_reward_function(dataset_type, config.get("magrpo.num_agents", 2))
     eval_logger, eval_aggregator = get_logger_and_aggregator(
         dataset_type, is_multi_turn
     )

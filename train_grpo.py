@@ -331,7 +331,6 @@ def main():
         max_new_tokens=grpo_config.get("max_new_tokens", 256),
         temperature=temperature,
         top_p=top_p,
-        beta=grpo_config.get("beta", 0.02),
     )
 
     formatter = get_formatter(dataset_type)
