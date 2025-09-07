@@ -120,7 +120,7 @@ You have access to a helper function: aux(...)
 
 IMPORTANT INSTRUCTIONS:
 - Output ONLY the function code, no explanations or examples
-- Do NOT include markdown code blocks (```python)
+- Do NOT include markdown code blocks (```python)  
 - Do NOT include any text before or after the function
 - Do NOT include test cases or example usage
 - Do NOT redefine the aux() function
@@ -137,9 +137,11 @@ def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
     return prompt_text
 
 
-def get_formatters(dataset_type: str):
-    """Get the appropriate formatters based on dataset type."""
+def get_formatters(dataset_type: str, num_agents: int):
+    """Get a list of per-agent formatters based on dataset type and agent count.
 
+    For code tasks, use aux formatters for all agents except the last, which uses main.
+    """
     if dataset_type is None:
         raise ValueError(
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
@@ -414,7 +416,6 @@ def main():
     # Get appropriate formatters and functions based on dataset type, agent count, and training mode
     formatters = get_formatters(dataset_type, config.get("magrpo.num_agents", 2))
     reward_func = get_reward_function(dataset_type, config.get("magrpo.num_agents", 2))
-
     eval_logger, eval_aggregator = get_logger_and_aggregator(
         dataset_type, is_multi_turn
     )
