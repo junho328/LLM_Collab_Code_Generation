@@ -33,8 +33,6 @@ def extract_last_json_from_response(response_text: str) -> Dict[str, str]:
 
 def get_expert_feedback(
     prompt: str,
-    test: str,
-    best_reward: float,
     aux_completion: str,
     main_completion: str,
     expert_model: str = "claude-3-5-sonnet-20241022",
@@ -45,8 +43,6 @@ def get_expert_feedback(
 
     Args:
         prompt: The problem statement
-        test: The unit tests
-        best_reward: The best reward from the previous turn
         aux_completion: The auxiliary agent's completion
         main_completion: The main agent's completion
         expert_model: The Claude model to use for feedback
@@ -60,8 +56,7 @@ def get_expert_feedback(
     imports = extract_imports_from_prompt(prompt)
     combined_code = concatenate_functions(aux_completion, main_completion, imports)
 
-    expert_prompt = f"""You are an advisor helping two agents (an auxiliary agent and a main agent) solve the following problem: {prompt} There are some unit tests: {test} The auxiliary agent provides a helper function (aux), while the main agent defines the task-specific logic.
-The current combined solution achieved a reward of {best_reward:.4f} / 4.0.
+    expert_prompt = f"""You are an expert helping two agents (an auxiliary agent and a main agent) solve the following problem: {prompt} The auxiliary agent provides a helper function (aux), while the main agent defines the task-specific logic.
 Your task is to review the provided code and return fixed codes. Specifically: 1. If you identify a missing element, such as an undefined aux or missing entry point (main function), you just rewrite one for it. 2. If both not missing, point out and make changes to any critical syntax or logic errors that would prevent the code from passing the given unit tests.
 Important instructions: 1. You should focus only on clear errors on the given unit tests. 2. Be conservative and lenient: ignore issues like redundancy, inefficiency, lack of edge case handling, or type annotations unless they cause failure in the given unit tests. 3. If either function independently completes the task correctly, you don't need to specify this error for this function. 4. Return "Perfect! No changes needed!" if logics are sound.
 IMPORTANT: Your response MUST contain the JSON format specified below. Always include both 'aux' and 'main' fields in the JSON, even if no changes are needed.
@@ -131,8 +126,6 @@ Respond in the following JSON format: {{ "aux": {{aux_func only here}}, "main": 
             # Print both full response and extracted functions for visibility
             print("\n" + "=" * 60)
             print("EXPERT FEEDBACK")
-            print("=" * 60)
-            print(f"Best reward from previous turn: {best_reward:.4f}")
             print("\n--- FULL EXPERT RESPONSE ---")
             print(response_text)
             print("\n--- EXTRACTED EXPERT FEEDBACK ---")
@@ -153,10 +146,7 @@ Respond in the following JSON format: {{ "aux": {{aux_func only here}}, "main": 
 
 def get_external_transition(
     prompt: str,
-    best_reward: float,
     agent_completions: Union[List[str], Tuple[str, str]],
-    batch_item: Optional[Dict] = None,
-    turn_idx: int = 0,
     num_agents: int = 2,
     **kwargs,
 ) -> Union[List[str], Tuple[str, str]]:
@@ -166,19 +156,14 @@ def get_external_transition(
 
     Args:
         prompt: The problem statement
-        best_reward: The best reward from the previous turn
         agent_completions: List of completions from all agents (or tuple for 2 agents)
         batch_item: Full batch item with additional data (e.g., test cases)
-        turn_idx: Current turn index
         num_agents: Number of agents
         **kwargs: Additional arguments for future extensibility (e.g., expert_model)
 
     Returns:
         List of external prompts for each agent (or tuple for backward compatibility)
     """
-    # Extract test from batch_item if available
-    test = batch_item.get("test", "") if batch_item else ""
-
     # Currently only 2-agent case is implemented
     if num_agents != 2:
         raise ValueError(
@@ -188,23 +173,17 @@ def get_external_transition(
     # Convert list to tuple if needed for cleaner handling
     if isinstance(agent_completions, list) and len(agent_completions) == 2:
         aux_completion, main_completion = agent_completions[0], agent_completions[1]
-    elif isinstance(agent_completions, tuple) and len(agent_completions) == 2:
-        aux_completion, main_completion = agent_completions
     else:
         raise ValueError(
             f"Expected 2 agent completions but got {len(agent_completions)}"
         )
 
     # Use the existing get_expert_feedback function for 2 agents
-    expert_model = kwargs.get("expert_model", "claude-3-5-sonnet-20241022")
+    expert_model = kwargs.get("expert_model", "DeepSeek-coder")
     aux_feedback, main_feedback = get_expert_feedback(
         prompt=prompt,
-        test=test,
-        best_reward=best_reward,
         aux_completion=aux_completion,
         main_completion=main_completion,
         expert_model=expert_model,
     )
-
-    # Return as tuple
     return (aux_feedback, main_feedback)
