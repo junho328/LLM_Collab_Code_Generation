@@ -75,7 +75,7 @@ def get_external_transition(
     original_prompt_flag = kwargs.get("original_prompt", False)
     previous_response_flag = kwargs.get("previous_response", True)
 
-    if mode in ("expert_edits", "expert", "edits"):
+    if mode == "expert_edits":
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         original_prompt, aux_edits, main_edits = expert_edits.add_expert_edits(
             prompt=prompt,
@@ -109,7 +109,7 @@ def get_external_transition(
         print("=" * 60 + "\n")
         return (aux_prompt, main_prompt)
 
-    if mode in ("level_feedback", "feedback"):
+    if mode == "level_feedback":
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         ctx = get_context(prompt) or {}
         entry_point = ctx.get("entry_point", "")
@@ -132,7 +132,7 @@ def get_external_transition(
         print("=" * 60 + "\n")
         return (aux_prompt, main_prompt)
 
-    if mode in ("level_passed", "signals"):
+    if mode == "level_passed":
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         ctx = get_context(prompt) or {}
         entry_point = ctx.get("entry_point", "")
@@ -155,7 +155,7 @@ def get_external_transition(
         print("=" * 60 + "\n")
         return (aux_prompt, main_prompt)
 
-    if mode in ("passed",):
+    if mode == "passed":
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         ctx = get_context(prompt) or {}
         entry_point = ctx.get("entry_point", "")
@@ -178,7 +178,7 @@ def get_external_transition(
         print("=" * 60 + "\n")
         return (aux_prompt, main_prompt)
 
-    if mode in ("plain",):
+    if mode == "plain":
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         ctx = get_context(prompt) or {}
         entry_point = ctx.get("entry_point", "")
@@ -201,6 +201,7 @@ def get_external_transition(
         print("=" * 60 + "\n")
         return (aux_prompt, main_prompt)
 
+    supported = ["expert_edits", "level_feedback", "level_passed", "passed", "plain"]
     raise NotImplementedError(
-        f"External transition mode '{mode}' is not implemented yet."
+        f"External transition mode '{mode}' is not implemented yet. Supported: {', '.join(supported)}"
     )
