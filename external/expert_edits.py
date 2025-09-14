@@ -10,6 +10,7 @@ from rewards.code_utils import (
     extract_imports_from_prompt,
     extract_specific_function,
 )
+from .common import build_first_turn_prompts
 
 
 def _extract_last_json_from_response(response_text: str) -> dict:
@@ -142,6 +143,8 @@ def format_followup_prompts(
     entry_point: str = "",
     aux_completion: str = "",
     main_completion: str = "",
+    original_prompt_flag: bool = False,
+    previous_response_flag: bool = True,
 ) -> Tuple[str, str]:
     """
     Format the 2+ turn prompts for expert_edits mode to match other modes:
@@ -157,24 +160,33 @@ def format_followup_prompts(
         extract_specific_function(main_completion or "", target_entry) or "<no implementation found>"
     )
 
-    aux_lines = [
-        "Your previous aux(...) implementation:",
-        prev_aux,
-        "",
+    aux_lines = []
+    main_lines = []
+
+    # Optional: include original first-turn prompts at the top
+    if original_prompt_flag:
+        aux_base, main_base = build_first_turn_prompts(original_prompt, target_entry)
+        aux_lines.extend([aux_base, ""])  # add a blank line after context
+        main_lines.extend([main_base, ""])
+
+    # Optional: include previous responses
+    if previous_response_flag:
+        aux_lines.extend(["Your previous aux(...) implementation:", prev_aux, ""])
+        main_lines.extend(["Your previous main implementation:", prev_main, ""])
+
+    # Always include external message for this mode
+    aux_lines.extend([
         "Here is edited snippet from an expert model:",
         (aux_edits or "").strip(),
         "",
         "Revise your aux(...) accordingly. Output ONLY the function code with no extra text.",
-    ]
+    ])
 
-    main_lines = [
-        "Your previous main implementation:",
-        prev_main,
-        "",
+    main_lines.extend([
         "Here is edited snippet from an expert model:",
         (main_edits or "").strip(),
         "",
         f"Revise your {target_entry}(...) accordingly. Output ONLY the function code with no extra text.",
-    ]
+    ])
 
     return ("\n".join(aux_lines), "\n".join(main_lines))

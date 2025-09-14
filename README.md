@@ -1,5 +1,16 @@
 # LLM Collaboration with MARL
 
+- [LLM Collaboration with MARL](#llm-collaboration-with-marl)
+- [Benchmarks](#benchmarks)
+- [Training Scripts](#training-scripts)
+  - [Default Configs](#default-configs)
+  - [Parameter Overrides](#parameter-overrides)
+  - [Legacy Command-Line Args](#legacy-command-line-args)
+- [Multi-Turn Settings](#multi-turn-settings)
+  - [2+Turn Prompt Composition](#2turn-prompt-composition)
+  - [External Modes](#external-modes)
+  - [Sandbox Tests](#sandbox-tests)
+
 This repository contains training scripts and configurations for the paper "LLM Collaboration with Multi‑Agent Reinforcement Learning".
 
 ## Benchmarks
@@ -61,8 +72,19 @@ python LLM_Collaboration_with_MARL/train_magrpo.py \
   --config LLM_Collaboration_with_MARL/configs/mt_magrpo_he_config.yaml \
   --num_epochs 10 --num_turns 2 --turn_gradient_weights 1.2 0.8
 ```
+## Multi-Turn Settings
 
-## Multi-Turn External Modes
+### 2+Turn Prompt Composition
+
+To save memory usage, 2+ turn prompts include the previous response without the original first‑turn problem prompt by default. You can add the original prompt to match the concept of observation-action history in MARL.
+
+```bash
+python LLM_Collaboration_with_MARL/train_magrpo.py \
+  --config LLM_Collaboration_with_MARL/configs/mt_magrpo_he_config.yaml \
+  --override magrpo.external_original_prompt=True magrpo.external_previous_response=True
+```
+
+### External Modes
 
 Multi-turn training supports external transition modes for 2nd+ turns, set via `magrpo.external_mode`:
 
@@ -71,14 +93,14 @@ Multi-turn training supports external transition modes for 2nd+ turns, set via `
   - Requires corrsponding API keys in env vars.
 - `level_passed`: Binary passed signals (impl found, syntax, tests summary, aux usage). 
 - `level_feedback`: Detailed diagnostics (impl found, syntax with line/col, per-test pass/fail errors, aux usage).
-- `passed`: A binary signal — “All levels passed” or “Not all levels passed”.
+- `passed`: A binary signal — "All levels passed" or "Not all levels passed".
 - `plain`: No signals or diagnostics.
 
 ```bash
 # HumanEval with detailed feedback signals
 python LLM_Collaboration_with_MARL/train_magrpo.py \
   --config LLM_Collaboration_with_MARL/configs/mt_magrpo_he_config.yaml \
-  --override magrpo.num_turns=2 magrpo.external_mode='level_feedback'
+  --override magrpo.external_mode='level_feedback'
 ```
 
 ### Sandbox Tests
@@ -92,6 +114,5 @@ Note: `magrpo.sandbox_slice` only affects analysis-based modes (`level_feedback`
 # Add a magrpo.sandbox_slice to override
 python LLM_Collaboration_with_MARL/train_magrpo.py \
   --config LLM_Collaboration_with_MARL/configs/mt_magrpo_che_config.yaml \
-  --override magrpo.num_turns=2 magrpo.external_mode='level_feedback' magrpo.sandbox_slice=-2
+  --override magrpo.external_mode='level_feedback' magrpo.sandbox_slice=-2
 ```
-

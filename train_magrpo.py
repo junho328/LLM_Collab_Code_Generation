@@ -524,12 +524,19 @@ def main():
 
         def external_transition_wrapper(prompt, agent_completions, num_agents, **et_kwargs):
             # Returns full next-turn prompts per agent (strings)
+            # Allow overrides via config and forwarded kwargs
+            original_prompt_flag = magrpo_config.get("external_original_prompt", False)
+            previous_response_flag = magrpo_config.get("external_previous_response", True)
+
             return get_external_transition(
                 prompt=prompt,
                 agent_completions=agent_completions,
                 num_agents=num_agents,
                 expert_model=expert_model,
                 mode=external_mode,
+                original_prompt=original_prompt_flag,
+                previous_response=previous_response_flag,
+                **et_kwargs,
             )
 
         trainer_kwargs["external_transition"] = external_transition_wrapper

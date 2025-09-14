@@ -71,6 +71,10 @@ def get_external_transition(
 
     # Route to the requested mode implementation
     mode = (mode or "").lower()
+    # Pull common flags controlling prompt composition
+    original_prompt_flag = kwargs.get("original_prompt", False)
+    previous_response_flag = kwargs.get("previous_response", True)
+
     if mode in ("expert_edits", "expert", "edits"):
         aux_comp, main_comp = agent_completions[0], agent_completions[1]
         original_prompt, aux_edits, main_edits = expert_edits.add_expert_edits(
@@ -91,6 +95,8 @@ def get_external_transition(
             entry_point=entry_point,
             aux_completion=aux_comp,
             main_completion=main_comp,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
         )
 
         # Print preview only when explicitly requested via preview=True
@@ -114,6 +120,8 @@ def get_external_transition(
             main_completion=main_comp,
             test_code=test_code,
             entry_point=entry_point,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
         )
         print("\n" + "=" * 60)
         print("EXTERNAL MODE PREVIEW: level_feedback")
@@ -135,6 +143,8 @@ def get_external_transition(
             main_completion=main_comp,
             test_code=test_code,
             entry_point=entry_point,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
         )
         print("\n" + "=" * 60)
         print("EXTERNAL MODE PREVIEW: level_passed")
@@ -156,6 +166,8 @@ def get_external_transition(
             main_completion=main_comp,
             test_code=test_code,
             entry_point=entry_point,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
         )
         print("\n" + "=" * 60)
         print("EXTERNAL MODE PREVIEW: passed")
@@ -177,6 +189,8 @@ def get_external_transition(
             main_completion=main_comp,
             test_code=test_code,
             entry_point=entry_point,
+            original_prompt_flag=original_prompt_flag,
+            previous_response_flag=previous_response_flag,
         )
         print("\n" + "=" * 60)
         print("EXTERNAL MODE PREVIEW: plain")
