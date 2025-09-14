@@ -1,5 +1,6 @@
 # LLM Collaboration with MARL
 
+This repository contains training scripts and configurations for the paper "LLM Collaboration with Multi‑Agent Reinforcement Learning".
 - [LLM Collaboration with MARL](#llm-collaboration-with-marl)
 - [Benchmarks](#benchmarks)
 - [Training Scripts](#training-scripts)
@@ -10,8 +11,6 @@
   - [2+Turn Prompt Composition](#2turn-prompt-composition)
   - [External Modes](#external-modes)
   - [Sandbox Tests](#sandbox-tests)
-
-This repository contains training scripts and configurations for the paper "LLM Collaboration with Multi‑Agent Reinforcement Learning".
 
 ## Benchmarks
 
