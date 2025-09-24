@@ -202,32 +202,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train GRPO with configurable dataset")
     add_config_args(parser)
 
-    # Optional direct overrides similar to train_magrpo.py
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        default=None,
-        help="Model name to use (overrides config)",
-    )
-    parser.add_argument(
-        "--output_base_dir",
-        type=str,
-        default=None,
-        help="Base output directory (overrides config)",
-    )
-    parser.add_argument(
-        "--num_turns",
-        type=int,
-        default=None,
-        help="Number of turns for multi-turn training (overrides config)",
-    )
-    parser.add_argument(
-        "--turn_gradient_weights",
-        type=float,
-        nargs="+",
-        default=None,
-        help="Turn gradient weights for multi-turn training (overrides config)",
-    )
+    
 
     args = parser.parse_args()
 
@@ -244,14 +219,7 @@ def main():
         overrides = parse_overrides(args.override)
         config.update(overrides)
 
-    if args.model_name:
-        config.update({"model_name": args.model_name})
-    if args.output_base_dir:
-        config.update({"output": {"base_dir": args.output_base_dir}})
-    if args.num_turns is not None:
-        config.update({"grpo": {"num_turns": args.num_turns}})
-    if args.turn_gradient_weights is not None:
-        config.update({"grpo": {"turn_gradient_weights": args.turn_gradient_weights}})
+    
 
     # Load model configuration
     model_config = config.get_model_config()
@@ -513,9 +481,24 @@ def main():
     }
 
     reward_processor = None
+    # Optional scale
     if config.get("reward_processor.enabled", False):
         scale_factor = config.get("reward_processor.scale_factor", 1)
         reward_processor = RewardProcessors.scale(factor=scale_factor)
+    # Optional shift via grpo.reward_shift
+    shift_val = grpo_config.get("reward_shift", None)
+    if shift_val is not None:
+        try:
+            shift_val_f = float(shift_val)
+        except (TypeError, ValueError):
+            shift_val_f = None
+        if shift_val_f is not None:
+            shift_proc = RewardProcessors.shift(value=shift_val_f)
+            if reward_processor is None:
+                reward_processor = shift_proc
+            else:
+                prev = reward_processor
+                reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
 
     # Use agents=[model] to keep dtype and loading behavior aligned with MAGRPO
     trainer_kwargs = {
