@@ -187,9 +187,11 @@ def main():
     num_turns = grpo_config.get("num_turns", 1)
     is_multi_turn = num_turns > 1
 
-    print(f"Multi-turn GRPO enabled: num_turns={num_turns}") if is_multi_turn else print(
-        f"Single-turn GRPO: num_turns={num_turns}"
-    )
+    output_verbose = config.get("output.verbose", True)
+    if output_verbose:
+        print(f"Multi-turn GRPO enabled: num_turns={num_turns}") if is_multi_turn else print(
+            f"Single-turn GRPO: num_turns={num_turns}"
+        )
 
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
     # Use different output directory prefix for multi-turn for clarity
@@ -353,6 +355,7 @@ def main():
         num_turns=num_turns,
         discount=grpo_config.get("discount", 0.9),
         joint_mode=grpo_config.get("joint_mode", "cross"),
+        termination_threshold=grpo_config.get("termination_threshold", None),
     )
 
     formatter = get_formatter(dataset_type)
@@ -405,6 +408,18 @@ def main():
             "trainer": grpo_config,
         },
     }
+
+    # Propagate verbosity to reward/external modules
+    try:
+        import rewards.code_rewards as code_rewards
+        code_rewards.VERBOSE = bool(output_verbose)
+    except Exception:
+        pass
+    try:
+        import external as external_mod
+        external_mod.VERBOSE = bool(output_verbose)
+    except Exception:
+        pass
 
     reward_processor = None
     # Optional scale
