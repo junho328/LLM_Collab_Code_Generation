@@ -36,7 +36,7 @@ python LLM_Collaboration_with_MARL/train_magrpo.py \
 
 `magrpo.joint_mode` determine how to combine each agent's K generations into joint actions at each turn. 2 modes are supported: if set 'align' by default, each agent's k-th generation is paired with the other agents' k-th generations to form a joint action; if set 'cross', all combinations of the agents' K generations are used to form joint actions (K^N joint actions for N agents).
 
-Since the number of samples will also grow exponentially with the number of turns, aligned joint will be **more flexible** (\#samples could not be a perfect power) and hence faster to train in wall time. However, using cross joint will be more sample efficient (much lower VRAM compare to 'align' when num_generations=K^N), it also performs better since the value estimation is more accurate.
+Since the number of samples will also grow exponentially with the number of turns, aligned joint will be **more flexible** (\#samples could not be a perfect power) and hence faster to train in wall time. However, using cross joint will be **more sample efficient** (much lower VRAM compare to 'align' when num_generations=K^N), it also performs better since the **value estimation is more accurate**.
 
 ### Number of Turns
 
