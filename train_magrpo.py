@@ -10,8 +10,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from pathlib import Path
-from typing import Any, Dict, Optional
+ 
+from typing import Any, Dict
 
 from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
@@ -110,7 +110,7 @@ def get_formatters(dataset_type: str, num_agents: int):
 
     For code tasks, use aux formatters for all agents except the last, which uses main.
     """
-    if dataset_type.lower() in ["humaneval", "coophumaneval"] and num_agents == 2:
+    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"] and num_agents == 2:
         return [aux_function_formatter, main_function_formatter]
 
     raise NotImplementedError("Other number of agents have not been implemented yet")
@@ -125,7 +125,7 @@ def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
         return None, None
 
     # Use unified multi-turn compatible logger/aggregator for code datasets
-    if dataset_type.lower() in ["humaneval", "coophumaneval"]:
+    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
         return mt_humaneval_logger, aggregate_mt_humaneval_metrics_for_logging
 
     return None, None
@@ -142,7 +142,7 @@ def get_reward_function(dataset_type: str, num_agents: int):
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
         )
 
-    if dataset_type.lower() in ["humaneval", "coophumaneval"]:
+    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
 
         def reward_wrapper(*agent_completions, batch_items=None, prompts=None):
             # agent_completions: tuple of lists (one list per agent), each list contains strings per completion
@@ -189,6 +189,9 @@ def main():
 
     args = parser.parse_args()
 
+    # ------------------------------------------------------------------
+    # Config: load YAML and apply overrides
+    # ------------------------------------------------------------------
     if args.config:
         config = Config(args.config)
     else:
@@ -201,12 +204,14 @@ def main():
     # Apply command-line overrides
     
 
-    # Load model configuration
+    # ------------------------------------------------------------------
+    # Config: model, dataset, output
+    # ------------------------------------------------------------------
     model_config = config.get_model_config()
     model_name = model_config.name
-    output_base_dir = config.get("output.base_dir")
     dataset_name = config.get("dataset.name")
     dataset_type = config.get("dataset.type")
+    output_base_dir = config.get("output.base_dir")
 
     # Try to infer dataset type from dataset name if not specified
     if dataset_type is None:
@@ -214,6 +219,8 @@ def main():
             dataset_type = "humaneval"
         elif "coophumaneval" in dataset_name.lower() or "coop" in dataset_name.lower():
             dataset_type = "coophumaneval"
+        elif "mbpp" in dataset_name.lower():
+            dataset_type = "mbpp"
         else:
             raise ValueError(
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
@@ -223,15 +230,14 @@ def main():
     train_split = config.get("dataset.train_split")
     eval_split = config.get("dataset.eval_split")
 
-    # Get MAGRPO configuration (works for both single and multi-turn)
+    # ------------------------------------------------------------------
+    # Config: MAGRPO training params and verbosity
+    # ------------------------------------------------------------------
     magrpo_config = (
         config.get_section("magrpo") if hasattr(config, "get_section") else {}
     )
-
-    # Check if this is multi-turn training
     num_turns = magrpo_config.get("num_turns", 1)
     is_multi_turn = num_turns > 1
-
     output_verbose = config.get("output.verbose", True)
     if output_verbose:
         print(f"Multi-turn training enabled: num_turns={num_turns}") if is_multi_turn else print(
@@ -291,7 +297,9 @@ def main():
     temperature = magrpo_config.get("temperature", model_config.temperature)
     top_p = magrpo_config.get("top_p", model_config.top_p)
 
-    # External configuration (mode, sandbox, expert model, context flags)
+    # ------------------------------------------------------------------
+    # Config: External transitions (mode, sandbox, expert model, context flags)
+    # ------------------------------------------------------------------
     external_cfg = config.get_section("external") if hasattr(config, "get_section") else {}
 
     # Register external context resolver using dataset items
@@ -318,7 +326,7 @@ def main():
     else:
         sandbox_slice = None if _sandbox_val is None else 0
 
-    import re
+    # re already imported at module level
 
     def _make_sliced_assert_tests(test_code: str, n: int) -> str:
         if not isinstance(test_code, str) or not test_code.strip():
@@ -389,6 +397,9 @@ def main():
     external_ctx.set_context_resolver(_resolver)
 
     # Use unified MAGRPOConfig which handles both single-turn and multi-turn
+    # ------------------------------------------------------------------
+    # Build training args
+    # ------------------------------------------------------------------
     magrpo_args = MAGRPOConfig(
         output_dir=output_dir,
         num_agents=magrpo_config.get("num_agents", 2),  # Pass num_agents to the config
@@ -408,22 +419,25 @@ def main():
         discount=magrpo_config.get("discount", 0.9),
         joint_mode=magrpo_config.get("joint_mode", "aligned"),
         termination_threshold=magrpo_config.get("termination_threshold", None),
-        # GRPO-style advantage params
-        normalize_advantage=magrpo_config.get("normalize_advantage", False),
         epsilon_clip=magrpo_config.get("epsilon_clip", None),
     )
 
-    # Get appropriate formatters and functions based on dataset type, agent count, and training mode
+    # ------------------------------------------------------------------
+    # Formatters, rewards, and logging
+    # ------------------------------------------------------------------
     formatters = get_formatters(dataset_type, config.get("magrpo.num_agents", 2))
     reward_func = get_reward_function(dataset_type, config.get("magrpo.num_agents", 2))
     eval_logger, eval_aggregator = get_logger_and_aggregator(
         dataset_type, is_multi_turn
     )
 
+    # ------------------------------------------------------------------
+    # W&B configuration and tags
+    # ------------------------------------------------------------------
     wandb_section = (
         config.get_section("wandb") if hasattr(config, "get_section") else {}
     )
-    model_short_name = model_name.split("/")[-1].lower()
+    # Model short name no longer used in W&B naming
 
     # Use different wandb name for multi-turn
     if is_multi_turn:
@@ -450,7 +464,7 @@ def main():
     wandb_config = {
         "project": wandb_section.get("project", "mlrl"),
         "entity": wandb_section.get("entity", "nu-llpr"),
-        "name": f"{wandb_name}_{model_short_name}",
+        "name": f"{wandb_name}",
         "dir": wandb_section.get("dir", "../../../projects/bepg/sliu30"),
         "tags": tags,
         # Provide full sections for the trainer to log cleanly
@@ -506,19 +520,26 @@ def main():
                 prev = reward_processor
                 reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
 
+    # ------------------------------------------------------------------
+    # Build trainer kwargs (grouped: model/data, reward/formatting, logging, args)
+    # ------------------------------------------------------------------
     trainer_kwargs = {
+        # Model / data
         "agents": agents,
         "num_agents": num_agents,
-        "reward_func": reward_func,
-        "formatters": formatters,
-        "args": magrpo_args,
+        "tokenizer": tokenizer,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
-        "tokenizer": tokenizer,
+        # Reward / formatting
+        "reward_func": reward_func,
+        "formatters": formatters,
+        # Logging / eval / config
         "wandb_config": wandb_config,
         "eval_logger": eval_logger,
         "eval_aggregator": eval_aggregator,
         "dataset_type": dataset_type,
+        # Training args
+        "args": magrpo_args,
     }
 
     if reward_processor is not None:
@@ -527,7 +548,7 @@ def main():
     if (
         is_multi_turn
         and dataset_type
-        and dataset_type.lower() in ["humaneval", "coophumaneval"]
+        and dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]
     ):
         expert_model = external_cfg.get("expert_model", "deepseek-coder")
         # external_mode already loaded above

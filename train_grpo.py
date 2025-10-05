@@ -105,7 +105,7 @@ def execution_reward_single_agent(completions, batch_items=None):
     return raw_rewards
 
 
-## Removed dead factory create_execution_reward_function (unused)
+ 
 
 
 def get_formatter(dataset_type: str):
@@ -118,6 +118,7 @@ def get_formatter(dataset_type: str):
     formatters_map = {
         "humaneval": complete_function_formatter,
         "coophumaneval": complete_function_formatter,
+        "mbpp": complete_function_formatter,
     }
     return formatters_map.get(dataset_type.lower(), complete_function_formatter)
 
@@ -129,7 +130,7 @@ def get_reward_function(dataset_type: str):
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
         )
 
-    if dataset_type.lower() in ["humaneval", "coophumaneval"]:
+    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
         return execution_reward_single_agent
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
@@ -144,6 +145,9 @@ def main():
 
     args = parser.parse_args()
 
+    # ------------------------------------------------------------------
+    # Config: load YAML and apply overrides
+    # ------------------------------------------------------------------
     if args.config:
         config = Config(args.config)
     else:
@@ -157,14 +161,14 @@ def main():
         overrides = parse_overrides(args.override)
         config.update(overrides)
 
-    
-
-    # Load model configuration
+    # ------------------------------------------------------------------
+    # Config: model, dataset, output
+    # ------------------------------------------------------------------
     model_config = config.get_model_config()
     model_name = model_config.name
-    output_base_dir = config.get("output.base_dir")
     dataset_name = config.get("dataset.name")
     dataset_type = config.get("dataset.type")
+    output_base_dir = config.get("output.base_dir")
 
     # Try to infer dataset type from dataset name if not specified
     if dataset_type is None:
@@ -172,6 +176,8 @@ def main():
             dataset_type = "humaneval"
         elif "coophumaneval" in dataset_name.lower() or "coop" in dataset_name.lower():
             dataset_type = "coophumaneval"
+        elif "mbpp" in dataset_name.lower():
+            dataset_type = "mbpp"
         else:
             raise ValueError(
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
@@ -180,13 +186,12 @@ def main():
     train_split = config.get("dataset.train_split")
     eval_split = config.get("dataset.eval_split")
 
-    # Read GRPO section early (for multi-turn flags)
+    # ------------------------------------------------------------------
+    # Config: GRPO training params and verbosity
+    # ------------------------------------------------------------------
     grpo_config = config.get_section("grpo") if hasattr(config, "get_section") else {}
-
-    # Determine single vs multi-turn
     num_turns = grpo_config.get("num_turns", 1)
     is_multi_turn = num_turns > 1
-
     output_verbose = config.get("output.verbose", True)
     if output_verbose:
         print(f"Multi-turn GRPO enabled: num_turns={num_turns}") if is_multi_turn else print(
@@ -251,7 +256,9 @@ def main():
     temperature = grpo_config.get("temperature", model_config.temperature)
     top_p = grpo_config.get("top_p", model_config.top_p)
 
-    # External configuration (mode, sandbox, expert model, context flags)
+    # ------------------------------------------------------------------
+    # Config: External transitions (mode, sandbox, expert model, context flags)
+    # ------------------------------------------------------------------
     external_cfg = config.get_section("external") if hasattr(config, "get_section") else {}
 
     # Register external context resolver using dataset items (for external modes)
@@ -278,7 +285,7 @@ def main():
     else:
         sandbox_slice = None if _sandbox_val is None else 0
 
-    import re as _re
+    # re already imported at module level
 
     def _make_sliced_assert_tests(test_code: str, n: int) -> str:
         if not isinstance(test_code, str) or not test_code.strip():
@@ -289,7 +296,7 @@ def main():
         preamble = []
         check_idx = None
         for idx, line in enumerate(lines):
-            if _re.match(r"\s*def\s+check\s*\(candidate\)\s*:\s*", line):
+            if re.match(r"\s*def\s+check\s*\(candidate\)\s*:\s*", line):
                 check_idx = idx
                 break
             preamble.append(line)
@@ -340,6 +347,9 @@ def main():
 
     external_ctx.set_context_resolver(_resolver)
 
+    # ------------------------------------------------------------------
+    # Build training args
+    # ------------------------------------------------------------------
     grpo_args = MAGRPOConfig(
         output_dir=output_dir,
         num_train_epochs=grpo_config.get("num_train_epochs", 10),
@@ -356,18 +366,22 @@ def main():
         discount=grpo_config.get("discount", 0.9),
         joint_mode=grpo_config.get("joint_mode", "aligned"),
         termination_threshold=grpo_config.get("termination_threshold", None),
-        # GRPO-style advantage params
-        normalize_advantage=grpo_config.get("normalize_advantage", False),
         epsilon_clip=grpo_config.get("epsilon_clip", None),
     )
 
+    # ------------------------------------------------------------------
+    # Formatters, rewards, and logging
+    # ------------------------------------------------------------------
     formatter = get_formatter(dataset_type)
     reward_func = get_reward_function(dataset_type)
 
+    # ------------------------------------------------------------------
+    # W&B configuration and tags
+    # ------------------------------------------------------------------
     wandb_section = (
         config.get_section("wandb") if hasattr(config, "get_section") else {}
     )
-    model_short_name = model_name.split("/")[-1].lower()
+    # Model short name no longer used in W&B naming
     # Use different wandb name for multi-turn
     if is_multi_turn:
         wandb_name = wandb_section.get("name", f"mt_grpo_{dataset_type}")
@@ -399,7 +413,7 @@ def main():
     wandb_config = {
         "project": wandb_section.get("project", "mlrl"),
         "entity": wandb_section.get("entity", "nu-llpr"),
-        "name": f"{wandb_name}_{model_short_name}",
+        "name": f"{wandb_name}",
         "dir": wandb_section.get("dir", "../../../projects/bepg/sliu30"),
         "tags": tags,
         # Provide full sections for the trainer to log cleanly
@@ -444,18 +458,24 @@ def main():
                 prev = reward_processor
                 reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
 
-    # Use agents=[model] to keep dtype and loading behavior aligned with MAGRPO
+    # ------------------------------------------------------------------
+    # Build trainer kwargs (grouped: model/data, reward/formatting, logging, args)
+    # ------------------------------------------------------------------
     trainer_kwargs = {
+        # Model / data
         "agents": [model],
         "num_agents": 1,
-        "reward_func": reward_func,
-        "formatters": formatter,
-        "args": grpo_args,
+        "tokenizer": tokenizer,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
-        "tokenizer": tokenizer,
+        # Reward / formatting
+        "reward_func": reward_func,
+        "formatters": formatter,
+        # Logging / config
         "wandb_config": wandb_config,
         "dataset_type": dataset_type,
+        # Training args
+        "args": grpo_args,
     }
 
     if reward_processor is not None:
@@ -465,7 +485,7 @@ def main():
     if (
         is_multi_turn
         and dataset_type
-        and dataset_type.lower() in ["humaneval", "coophumaneval"]
+        and dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]
     ):
         expert_model = external_cfg.get("expert_model", "deepseek-coder")
 

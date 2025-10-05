@@ -3,8 +3,7 @@ import json
 import re
 import signal
 import time
-from collections import defaultdict
-from math import comb
+ 
 
 import numpy as np
 import torch
@@ -734,6 +733,9 @@ def {entry_point}({params_str}):
 
 
 def main():
+    # --------------------------------------------------------------
+    # CLI: parse arguments
+    # --------------------------------------------------------------
     parser = argparse.ArgumentParser(
         description="HumanEval Single Agent Baseline Evaluation"
     )
@@ -763,12 +765,16 @@ def main():
 
     args = parser.parse_args()
 
-    # Initialize baseline evaluator
+    # --------------------------------------------------------------
+    # Initialize evaluator
+    # --------------------------------------------------------------
     evaluator = QwenHumanEvalSingleAgentBaseline(
         model_name=args.model, device=args.device
     )
 
+    # --------------------------------------------------------------
     # Run evaluation
+    # --------------------------------------------------------------
     aggregated_metrics, sample_results = evaluator.evaluate_humaneval_baseline(
         num_samples=args.samples,
         num_generations=args.generations,

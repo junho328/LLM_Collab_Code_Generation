@@ -13,10 +13,10 @@ model:
 
 # dataset
 dataset:
-  name: "openai/openai_humaneval"
-  type: "humaneval"
-  train_split: "test[33:163]"
-  eval_split: "test[:32]"
+  name: "OpenMLRL/MBPP"
+  type: "mbpp"
+  train_split: "test[15:65]"
+  eval_split: "test[:15]"
 
 # output
 output:
@@ -31,27 +31,28 @@ external:
   original_prompt: true
   previous_response: true
 
-# magrpo
-magrpo:
+# grpo
+grpo:
   num_turns: 2
-  num_train_epochs: 6
+  num_train_epochs: 8
   per_device_train_batch_size: 1
-  learning_rate: 2.0e-5
+  learning_rate: 3.0e-5
   logging_steps: 50
   save_steps: 200
   num_generations: 4
   max_new_tokens: 256
   joint_mode: aligned
-  num_agents: 2
+  temperature: 0.8
+  top_p: 0.95
   discount: 0.9
-  termination_threshold: -0.2
-  reward_shift: -4
+  termination_threshold: -0.1
+  reward_shift: -2.1
   epsilon_clip: null
 
 # wandb
 wandb:
   project: "mlrl"
   entity: "nu-llpr"
-  name: "magrpo_humaneval"
+  name: "grpo_mbpp"
   dir: "output"
-  tags: ["magrpo", "humaneval", "multi-agent"]
+  tags: ["grpo", "mbpp"]

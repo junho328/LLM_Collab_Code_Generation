@@ -1,4 +1,4 @@
-from itertools import product
+ 
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +7,9 @@ import numpy as np
 plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
-# Create figure
+# ------------------------------------------------------------------
+# Figure setup
+# ------------------------------------------------------------------
 fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
 # Chicken Game payoff matrix with modified values

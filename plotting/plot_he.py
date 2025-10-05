@@ -4,13 +4,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PyPDF2
-import seaborn as sns
+ 
 import wandb
 from PyPDF2.generic import RectangleObject
 
 
 def plot_combined_three_panels():
     """Plot all three panels: Single Turn, MT Turn 1, and MT Turn 2 with larger fonts."""
+
+    # ------------------------------------------------------------------
+    # W&B setup and project selection
+    # ------------------------------------------------------------------
 
     # Initialize wandb API
     api = wandb.Api()
@@ -31,7 +35,9 @@ def plot_combined_three_panels():
     print(f"Found {len(humaneval_runs)} HumanEval runs")
     print(f"Found {len(mt_expert_runs)} Multi-Turn Expert HumanEval runs")
 
-    # Process single-turn data
+    # ------------------------------------------------------------------
+    # Fetch and clean histories
+    # ------------------------------------------------------------------
     single_turn_data = []
     for run in humaneval_runs:
         try:

@@ -1,6 +1,6 @@
 import json
 
- 
+import pandas as pd
 from datasets import Dataset, DatasetDict, Features, Value
 from huggingface_hub import HfApi, login
 
@@ -11,13 +11,9 @@ def upload_json_to_hf_dataset(json_file_path, dataset_name, hf_token=None):
 
     Args:
         json_file_path (str): Path to the JSON file
-        dataset_name (str): Name of the dataset on Hugging Face (e.g., "username/CoopHumanEval")
+        dataset_name (str): Name of the dataset on Hugging Face (e.g., "OpenMLRL/MBPP")
         hf_token (str, optional): Hugging Face API token. If None, will prompt for login.
     """
-
-    # ------------------------------------------------------------------
-    # Load raw JSON and normalize schema
-    # ------------------------------------------------------------------
 
     # Step 1: Load the JSON file
     print(f"Loading JSON file from {json_file_path}...")
@@ -56,9 +52,7 @@ def upload_json_to_hf_dataset(json_file_path, dataset_name, hf_token=None):
     # Create the dataset with features
     dataset = Dataset.from_dict(dataset_dict, features=features)
 
-    # ------------------------------------------------------------------
-    # Authenticate to Hugging Face
-    # ------------------------------------------------------------------
+    # Step 3: Login to Hugging Face
     if hf_token:
         login(token=hf_token)
     else:
@@ -66,16 +60,14 @@ def upload_json_to_hf_dataset(json_file_path, dataset_name, hf_token=None):
         login()
 
     # Step 4: Create a DatasetDict with a TEST split (not train)
-    dataset_dict = DatasetDict({"test": dataset})  # Changed from 'train' to 'test'
+    dataset_dict = DatasetDict({"test": dataset})
 
     # Step 5: Calculate dataset size
     # Convert dataset to pandas to estimate size
     df = dataset.to_pandas()
     dataset_size = sum(df.memory_usage(deep=True))
 
-    # ------------------------------------------------------------------
-    # Build dataset card (README) with metadata
-    # ------------------------------------------------------------------
+    # Step 6: Create README content BEFORE pushing
     readme_content = f"""---
 dataset_info:
   features:
@@ -108,20 +100,20 @@ tags:
 - python
 - programming
 - code-generation
-pretty_name: CoopHumanEval
+pretty_name: MBPP
 size_categories:
-- n<1K
+- 1K<n<10K
 ---
 
-# CoopHumanEval Dataset
+# MBPP Dataset
 
-This dataset contains programming challenges designed for cooperative code generation evaluation.
+This dataset contains programming challenges from the Mostly Basic Python Problems (MBPP) benchmark, converted to the coophumaneval format for cooperative code generation evaluation.
 
 ## Dataset Structure
 
 Each example contains:
-- `task_id`: Unique identifier for the task
-- `prompt`: The function signature and docstring with examples
+- `task_id`: Unique identifier for the task (MBPP/{{index}})
+- `prompt`: The function signature and docstring
 - `test`: Test cases to verify the solution
 - `entry_point`: The name of the function to implement
 
@@ -131,7 +123,7 @@ Each example contains:
 from datasets import load_dataset
 
 # Load the dataset
-dataset = load_dataset("{dataset_name}")
+dataset = load_dataset("{{dataset_name}}")
 
 # Access the test split
 test_data = dataset['test']
@@ -144,10 +136,10 @@ print(test_data[0])
 
 ```json
 {{
-  "task_id": "CoopHumanEval/0",
-  "prompt": "def find_nth_prime_cube(n):\\n    \\"\\"\\"Please find the cube of the nth prime number.\\n    \\n    Examples:\\n    >>> find_nth_prime_cube(1)\\n    8\\n    >>> find_nth_prime_cube(2)\\n    27\\n    >>> find_nth_prime_cube(3)\\n    125\\n    \\"\\"\\"\\n",
-  "test": "def check(candidate):\\n    assert candidate(1) == 8\\n    ...",
-  "entry_point": "find_nth_prime_cube"
+  "task_id": "MBPP/0",
+  "prompt": "def function_name():\n    '''Write a function to find the shared elements from the given two lists.\n    '''\n",
+  "test": "def check(candidate):\n    assert set(candidate((3, 4, 5, 6),(5, 7, 4, 10))) == set((4, 5))\n    assert set(candidate((1, 2, 3, 4),(5, 4, 3, 7))) == set((3, 4))\n    assert set(candidate((11, 12, 14, 13),(17, 15, 14, 13))) == set((13, 14))",
+  "entry_point": "function_name"
 }}
 ```
 
@@ -157,17 +149,30 @@ print(test_data[0])
 - **Split**: test
 - **Task type**: Code generation
 - **Programming language**: Python
+- **Source**: MBPP (Mostly Basic Python Problems) sanitized version
+
+## Original Dataset
+
+This dataset is based on the MBPP (Mostly Basic Python Problems) benchmark, which consists of around 1,000 crowd-sourced Python programming problems designed to be solvable by entry level programmers. We use the sanitized version which contains 427 hand-verified examples.
 
 ## Citation
 
-If you use this dataset, please cite:
+If you use this dataset, please cite both the original MBPP paper and this converted version:
 
 ```bibtex
-@dataset{{coophumaneval2024,
-  title={{CoopHumanEval: A Dataset for Cooperative Code Generation}},
-  author={{LovelyBuggies}},
-  year={{2024}},
-  publisher={{Hugging Face}}
+@dataset{{mbpp2025,
+  title={{MBPP: A Dataset for Cooperative Code Generation}},
+  author={{ryankamiri}},
+  year={{2025}},
+  publisher={{Hugging Face}},
+  based_on={{Austin et al., 2021}}
+}}
+
+@article{{austin2021program,
+  title={{Program Synthesis with Large Language Models}},
+  author={{Austin, Jacob and Odena, Augustus and Nye, Maxwell and Bosma, Maarten and Michalewski, Henryk and Dohan, David and Jiang, Ellen and Cai, Carrie and Terry, Michael and Le, Quoc and others}},
+  journal={{arXiv preprint arXiv:2107.03374}},
+  year={{2021}}
 }}
 ```
 """
@@ -177,7 +182,7 @@ If you use this dataset, please cite:
     dataset_dict.push_to_hub(
         dataset_name,
         private=False,
-        commit_message="Upload CoopHumanEval dataset with test split",
+        commit_message="Upload MBPP dataset with test split",
     )
 
     # Step 8: Upload README separately to ensure it's properly saved
@@ -193,40 +198,3 @@ If you use this dataset, please cite:
     print(
         f"Successfully uploaded dataset to https://huggingface.co/datasets/{dataset_name}"
     )
-    print("The dataset card should now be visible on the Hugging Face website.")
-
-
-def main():
-    # Configuration
-    json_file_path = "che_raw.json"
-
-    # Your Hugging Face username
-    dataset_name = "LovelyBuggies/CoopHumanEval"
-
-    # Optional: Set your Hugging Face token here, or leave as None to login interactively
-    hf_token = None  # or "hf_..."
-
-    # Upload the dataset
-    upload_json_to_hf_dataset(json_file_path, dataset_name, hf_token)
-
-
-if __name__ == "__main__":
-    main()
-
-
-# Alternative: Verify dataset after upload
-def verify_dataset(dataset_name):
-    """
-    Verify the uploaded dataset by loading it back.
-    """
-    from datasets import load_dataset
-
-    print(f"\nVerifying dataset {dataset_name}...")
-    dataset = load_dataset(dataset_name)
-
-    print(f"Available splits: {list(dataset.keys())}")
-    print(f"Number of examples in test split: {len(dataset['test'])}")
-    print(f"\nFirst example:")
-    print(dataset["test"][0])
-
-    return dataset
