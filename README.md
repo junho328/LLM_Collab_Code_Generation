@@ -36,7 +36,7 @@ Aligned is faster in wall‑time (fewer sibling evaluations per node), while cro
 
 ### Advantage
 
-Advantages are used to optimize the agents policies, which use a mean baseline without any standard‑deviation normalization to make training unbiased (see [Dr. GRPO](https://arxiv.org/pdf/2503.20783)). We do not apply importance sampling ratios either, since our training is in an on-policy manner (the same policy is used for sampling and training).
+Advantages are used to optimize the agents policies, which use a mean baseline without any standard‑deviation normalization to make training unbiased (see [Dr. GRPO](https://arxiv.org/pdf/2503.20783)). We do not apply importance sampling ratios either, since our training is in an on-policy manner (hence also no need for epsilon clipping).
 
 ### Number of Samples
 
