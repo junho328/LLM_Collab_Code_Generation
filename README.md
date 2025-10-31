@@ -40,7 +40,7 @@ Advantages are used to optimize the agents policies, which use a mean baseline w
 
 ### Number of Samples
 
-`magrpo.num_turns` is the number of turns in training and evaluation, and `magrpo.num_generations` is the number of samples per generation. Leaf (total samples at current turn) counts grow with $T$: `aligned` → $G^T$; `cross` → $G^{N\cdot T}$. At each node, the sibling set (competing joint actions under the same prompt/context/turn) has size $G$ for `aligned`, and $G^N$ for `cross`. The policy‑gradient baseline is the mean return over these siblings at that node, i.e., advantage $A_i = \mathrm{Return}_i - \operatorname{mean}_{\text{sibling}}(\mathrm{Return})$.
+`magrpo.num_turns` is the number of turns in training and evaluation, and `magrpo.num_generations` is the number of samples per generation. Leaf (total samples at current turn) counts grow with $T$: `aligned` → $G^T$; `cross` → $G^{N\cdot T}$. At each node, the sibling set (competing joint actions under the same prompt/context/turn) has size $G$ for `aligned`, and $G^N$ for `cross`. The policy‑gradient baseline is the mean return over these siblings at that node.
 
 ### Termination
 
