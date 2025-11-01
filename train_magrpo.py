@@ -453,7 +453,8 @@ def main():
     tags_from_cfg = wandb_section.get("tags", default_tags)
     # Ensure list
     tags = list(tags_from_cfg) if isinstance(tags_from_cfg, list) else default_tags
-    if external_mode in ["level_passed", "level_feedback", "passed"]:
+    # Add a marker tag for analysis-based external modes
+    if external_mode == "level_feedback":
         if "self-evolved" not in tags:
             tags.append("self-evolved")
 

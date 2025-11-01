@@ -52,13 +52,15 @@ Agents always receive their own full history on later turns: all of their previo
 
 ### External Modes
 
-`external.mode` is used to imitate the environment transition, which is set to 'level_feedback' by default. This gives additional information from external to prompts in the following turns; 'level_feedback' attaches test‑driven diagnostics, while alternatives include:
+`external.mode` controls how environment feedback shapes next‑turn prompts. Supported modes:
 
-- 'expert_edits': an LLM proposes edits; prompts include edit suggestions plus context.
-- 'level_passed' / 'passed': binary outcome oriented prompts with minimal context.
-- 'plain': no diagnostics, but still includes previous response (unless disabled) and a "revise your previous response" instruction.
+- 'level_feedback' (default): attaches static/dynamic diagnostics (syntax, tests, aux usage) and instructs code‑only revision.
+- 'expert_edits': uses an external expert LLM to propose compact edits, then asks for a code‑only revision.
+- 'plain': history‑only follow‑up with a concise "revise, code‑only" instruction (no diagnostics).
 
-Specific settings for 'level_feedback' is `external.sandbox_slice`, which controls how many eval tests to include in the feedback. By default, sandbox executes only the first assert (sandbox_slice=1). Use all eval tests by setting `external.sandbox_slice` to 0, None, or 'all'. Negative values use the last asserts. `external.sandbox_slice` only affects analysis-based modes ('level_feedback', 'level_passed', 'passed'), and it has no effect on 'expert_edits'.
+Modes 'level_passed' and 'passed' have been removed.
+
+Specific setting for 'level_feedback' is `external.sandbox_slice`, which controls how many eval tests to include in the feedback. By default, sandbox executes only the first assert (sandbox_slice=1). Use all eval tests by setting `external.sandbox_slice` to 0, None, or 'all'. Negative values use the last asserts. `external.sandbox_slice` affects analysis-based mode 'level_feedback' (not used by 'expert_edits' or 'plain').
 
 Specific settings for 'expert_edits' is `external.expert_edits_model`, which controls which LLM to use for proposing edits. By default, it uses DeepSeek-Coder. You can also change it to Claude, GPT, and other models, once you have keys/tokens in your environment.
 

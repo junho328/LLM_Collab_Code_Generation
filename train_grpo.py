@@ -395,7 +395,7 @@ def main():
     default_tags = ["grpo", dataset_type or "code", f"turns_{num_turns}"]
     tags_from_cfg = wandb_section.get("tags", default_tags)
     tags = list(tags_from_cfg) if isinstance(tags_from_cfg, list) else default_tags
-    if external_mode in ["level_passed", "level_feedback", "passed"]:
+    if external_mode == "level_feedback":
         if "self-evolved" not in tags:
             tags.append("self-evolved")
 
