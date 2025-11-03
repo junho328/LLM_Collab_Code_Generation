@@ -1,4 +1,4 @@
-# LLM Collaboration with MARL
+# LLM Collaboration - Code Generation
 
 Training scripts and configs for _"LLM Collaboration with Multi‑Agent Reinforcement Learning"_.
 
