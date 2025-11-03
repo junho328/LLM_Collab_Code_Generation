@@ -1,6 +1,6 @@
 # LLM Collaboration - Code Generation
 
-Training scripts and configs for _"LLM Collaboration with Multi‑Agent Reinforcement Learning"_.
+Training scripts and configs for code generation tasks in _"LLM Collaboration with Multi‑Agent Reinforcement Learning"_.
 
 ## Benchmarks
 
