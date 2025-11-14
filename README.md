@@ -1,6 +1,6 @@
-# LLM Collaboration - Code Generation
+# LLM Collaboration – Code Generation
 
-Training scripts and configs for code generation tasks in _"LLM Collaboration with Multi‑Agent Reinforcement Learning"_.
+Training scripts and configs for the code-generation tasks in _"LLM Collaboration with Multi‑Agent Reinforcement Learning"_.
 
 ## Benchmarks
 
@@ -11,59 +11,59 @@ Training scripts and configs for code generation tasks in _"LLM Collaboration wi
 ## Training Scripts
 
 ```bash
-python LLM_Collaboration_with_MARL/train_grpo.py \
-  --config LLM_Collaboration_with_MARL/configs/grpo_he_config.yaml
+python LLM_Collab_Code_Generation/train_grpo.py \
+  --config LLM_Collab_Code_Generation/configs/grpo_he_config.yaml
 
-python LLM_Collaboration_with_MARL/train_magrpo.py \
-  --config LLM_Collaboration_with_MARL/configs/magrpo_che_config.yaml
+python LLM_Collab_Code_Generation/train_magrpo.py \
+  --config LLM_Collab_Code_Generation/configs/magrpo_che_config.yaml
 ```
 
-You can always override any configuration parameter using `--override`:
+Override any configuration value inline with `--override`:
 
 ```bash
-python LLM_Collaboration_with_MARL/train_magrpo.py \
-  --config LLM_Collaboration_with_MARL/configs/magrpo_he_config.yaml \
+python LLM_Collab_Code_Generation/train_magrpo.py \
+  --config LLM_Collab_Code_Generation/configs/magrpo_he_config.yaml \
   --override model.name='bigcode/starcoder2-3b' magrpo.num_turns=1
 ```
 
 ## Settings
 
-### Joint Action
+### Joint Action Modes
 
-`magrpo.joint_mode` determines how to combine each agent’s $G$ generations into joint actions at each turn. Two modes are supported: 'align' (default), which pairs the $g$‑th generation of every agent to form $G$ joint actions per node; and 'cross', which forms the Cartesian product within a node, yielding $G^N$ joint actions per node ($N$ agents). Total leaf joint trajectories after $T$ turns (no early termination): align → $G^T$; cross → $G^{N\cdot T}$. 
+`magrpo.joint_mode` controls how each agent’s `magrpo.num_generations = G` samples combine into joint actions. `align` (default) pairs the $g$‑th sample from every agent, yielding $G$ siblings per node. `cross` forms the Cartesian product, yielding $G^N$ siblings for $N$ agents. After $T$ turns (no early termination), aligned trees expand to $G^T$ leaves, while crossed trees expand to $G^{N \cdot T}$. Align is faster in wall-clock time; cross reuses the same samples but provides denser credit assignment.
 
-Aligned is faster in wall‑time (fewer sibling evaluations per node), while cross is more sample‑efficient (better value estimation) without extra VRAM because it reuses the same G generations per agent and only crosses them within the node. We never cross across different nodes/prompts; this preserves causal state consistency (actions are conditioned on the same prompts), keeps siblings comparable for the baseline/advantage, maintains correct credit assignment (log‑probs matched to rewards from the same state), and remains computationally tractable.
+### Advantage & Baselines
 
-### Advantage
+Advantages use the mean return of the sibling set at each node as the baseline, matching the Dr. GRPO update. No standard-deviation normalization, importance sampling ratios, or epsilon clipping are applied because training is strictly on-policy.
 
-Advantages are used to optimize the agents policies, which use a mean baseline without any standard‑deviation normalization to make training unbiased (see [Dr. GRPO](https://arxiv.org/pdf/2503.20783)). We do not apply importance sampling ratios either, since our training is in an on-policy manner (hence also no need for epsilon clipping).
+### Sampling
 
-### Number of Samples
+`magrpo.num_turns` controls tree depth and `magrpo.num_generations` controls branching factor. Under `align`, each node has $G$ siblings and the trainer evaluates $G^T$ joint actions at depth $T$; under `cross`, each node has $G^N$ siblings and depth-$T$ leaves scale to $G^{N \cdot T}$. The same sibling baseline referenced above is reused for every node.
 
-`magrpo.num_turns` is the number of turns in training and evaluation, and `magrpo.num_generations` is the number of samples per generation. Leaf (total samples at current turn) counts grow with $T$: `aligned` → $G^T$; `cross` → $G^{N\cdot T}$. At each node, the sibling set (competing joint actions under the same prompt/context/turn) has size $G$ for `aligned`, and $G^N$ for `cross`. The policy‑gradient baseline is the mean return over these siblings at that node.
+### Termination Threshold
 
-### Termination
-
-`magrpo.termination_threshold` is used to incentivize agents to find high‑reward solutions quickly instead of expanding the full Monte Carlo tree. At each node (branch, turn), we compute the mean immediate reward across that node’s sibling joint actions; if the mean exceeds the threshold, that branch stops expanding at this turn and the trainer backpropagates from the truncated subtree. Other branches continue.
+`magrpo.termination_threshold` compares the mean immediate reward of the current sibling set against the threshold. When the threshold is exceeded, the branch stops expanding at that turn and the trainer backpropagates from the truncated subtree while other branches continue exploring.
 
 ### History
 
-Agents always receive their own full history on later turns: all of their previous prompts and all of their previous responses, plus the new external prompt/context for the turn. No cross‑agent history is inserted. The behavior is fixed to full history and is not configurable.
+Each agent receives its own full history at every turn: all of its past prompts and responses plus the new external prompt/context. No cross-agent transcripts are injected; coordination happens only through the shared reward.
 
-### External Modes
+### External Feedback
 
-`external.mode` controls how environment feedback shapes next‑turn prompts. Supported modes:
+`external.mode` shapes the prompt that seeds each turn:
 
-- 'level_feedback' (default): attaches static/dynamic diagnostics (syntax, tests, aux usage) and instructs code‑only revision.
-- 'expert_edits': uses an external expert LLM to propose compact edits, then asks for a code‑only revision.
-- 'plain': history‑only follow‑up with a concise "revise, code‑only" instruction (no diagnostics).
+- `level_feedback` (default) appends syntax/test diagnostics and asks for a code-only revision. `external.sandbox_slice` controls how many eval asserts to surface (1 by default, 0/None/`'all'` to show every test, negatives to index from the end).
+- `expert_edits` calls an external LLM (configured via `external.expert_edits_model`, default DeepSeek-Coder) to produce compact edit suggestions before asking for a revision.
+- `plain` simply restates the prior attempt and asks for a concise "revise, code-only" answer.
 
-Modes 'level_passed' and 'passed' have been removed.
+## Reward Structure
 
-Specific setting for 'level_feedback' is `external.sandbox_slice`, which controls how many eval tests to include in the feedback. By default, sandbox executes only the first assert (sandbox_slice=1). Use all eval tests by setting `external.sandbox_slice` to 0, None, or 'all'. Negative values use the last asserts. `external.sandbox_slice` affects analysis-based mode 'level_feedback' (not used by 'expert_edits' or 'plain').
+`rewards/code_rewards.py` implements the aux/main collaboration reward in three levels:
 
-Specific settings for 'expert_edits' is `external.expert_edits_model`, which controls which LLM to use for proposing edits. By default, it uses DeepSeek-Coder. You can also change it to Claude, GPT, and other models, once you have keys/tokens in your environment.
+1. **Function definitions**: +0.4 when the auxiliary function is well defined with a return value, +0.6 when the entry-point function is defined correctly. Missing the main definition halts scoring.
+2. **Syntax**: Both functions are concatenated with any imports extracted from the prompt; a clean syntax check yields +0.5 and allows execution.
+3. **Execution**: Prompt-derived tests (10 s timeout per assert, up to three timeouts) run inside a sandbox. Passing assertions earn up to +1.0, with +0.5 bonus when the main function uses the aux function, +1.0 when the main is not a thin wrapper, and −0.5 if the aux return value is ignored. These same rewards back evaluation during logging.
 
-### Output
+## Logging
 
-`output.save_model` is set to 'false' by default because of the huge storage required by multiple LLMs. `output.verbose` is used for debug printing on cluster if set to be true, but it is default to be false and you can only see a tqdm bar that shows the training progress.
+`loggers/` adapt the shared `MAGRPOTrainer` utilities to emit pass rates, syntax success, reward decomposition, termination statistics, and aux-usage diagnostics. Configure Weights & Biases by setting `wandb.project`, `wandb.entity`, and `wandb.name` in YAML or through overrides. `output.save_model` stays `false` by default to avoid storing large checkpoints, while `output.verbose` toggles the detailed per-episode traces used when debugging on a cluster.
