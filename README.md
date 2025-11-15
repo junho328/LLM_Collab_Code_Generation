@@ -1,10 +1,19 @@
 # LLM Collaboration – Code Generation
 
-This repository provides the code-generation experiments built on the CoMLRL project (https://github.com/OpenMLRL/CoMLRL) described in [_"LLM Collaboration with Multi‑Agent Reinforcement Learning"_](https://arxiv.org/abs/2508.04652).
+This repo provides the extended environments for [**CoMLRL**](https://github.com/OpenMLRL/CoMLRL).
 
-Training scripts and configs for the code-generation tasks in [_"LLM Collaboration with Multi‑Agent Reinforcement Learning"_](https://arxiv.org/abs/2508.04652).
+This repository contains the code-generation experiments in [**[AAAI26]** **_LLM Collaboration with Multi‑Agent Reinforcement Learning_**](https://arxiv.org/abs/2508.04652). 
 
 <img src="./demo_cg.gif" alt="Code generation demo" width="600px">
+
+## Installation
+
+You can install [**CoMLRL**](https://github.com/OpenMLRL/CoMLRL) from PyPI or conda-forge:
+
+```bash
+pip install comlrl
+conda install -c conda-forge comlrl
+```
 
 ## Benchmarks
 
