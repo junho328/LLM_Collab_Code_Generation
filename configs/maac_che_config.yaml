@@ -17,42 +17,49 @@ dataset:
   type: "coophumaneval"
   train_split: "test[16:]"
   eval_split: "test[:16]"
+  size: 128
+  eval_size: 16
 
 # output
 output:
   base_dir: "output"
-  save_final_model: false
   verbose: false
+  save_final_model: false
+  save_path: "output/maac_final"
 
 # external
 external:
   mode: "level_feedback"
   sandbox_slice: 1
 
-# magrpo
-magrpo:
+# maac
+maac:
   num_turns: 2
+  critic_type: "v"
   num_train_epochs: 20
   per_device_train_batch_size: 1
-  learning_rate: 5.0e-6
-  logging_steps: 50
-  save_steps: 200
-  eval_interval: 8
-  eval_num_samples: 4
-  num_generations: 4
+  actor_learning_rate: 5.0e-6
+  critic_learning_rate: 5.0e-6
+  value_loss_coef: 0.6
+  rollout_buffer_size: 8
+  mini_batch_size: 4
+  num_generations: 1
   max_new_tokens: 256
-  temperature: 0.8
-  top_p: 0.95
-  joint_mode: aligned
+  temperature: 0.6
+  top_p: 0.6
+  top_k: null
   num_agents: 2
-  discount: 0.9
-  termination_threshold: -0.2
+  critic_model: null
   reward_shift: -4
+  discount: 0.9
+  early_termination_threshold: -0.2
+  eval_interval: 4
+  eval_num_samples: 4
 
 # wandb
 wandb:
   project: "comlrl"
   entity: "OpenMLRL"
-  name: "magrpo_coophumaneval"
+  name: "maac_coophumaneval"
   dir: "output"
-  tags: ["magrpo", "coophumaneval", "multi-agent"]
+  tags: ["maac", "coophumaneval", "multi-agent", "turns_2"]
