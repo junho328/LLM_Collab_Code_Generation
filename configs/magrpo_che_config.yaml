@@ -13,7 +13,7 @@ model:
 
 # dataset
 dataset:
-  name: "CoMLRL/CoopHumanEval"
+  name: "OpenMLRL/CoopHumanEval"
   type: "coophumaneval"
   train_split: "test[16:]"
   eval_split: "test[:16]"
@@ -32,17 +32,20 @@ external:
 # magrpo
 magrpo:
   num_turns: 2
-  num_train_epochs: 20
+  external_prompt_passthrough: true
+  num_train_epochs: 8
   per_device_train_batch_size: 1
-  learning_rate: 5.0e-6
+  rollout_buffer_size: 4
+  learning_rate: 2.0e-5
   logging_steps: 50
   save_steps: 200
-  eval_interval: 8
+  eval_interval: 4
   eval_num_samples: 4
   num_generations: 4
   max_new_tokens: 256
-  temperature: 0.8
-  top_p: 0.95
+  temperature: 0.6
+  top_p: 0.6
+  top_k: null
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
@@ -55,4 +58,4 @@ wandb:
   entity: "OpenMLRL"
   name: "magrpo_coophumaneval"
   dir: "output"
-  tags: ["magrpo", "coophumaneval", "multi-agent"]
+  tags: ["magrpo", "coophumaneval", "multi-agent", "turns_2"]

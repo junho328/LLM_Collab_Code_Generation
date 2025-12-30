@@ -13,10 +13,10 @@ model:
 
 # dataset
 dataset:
-  name: "OpenMLRL/CoopHumanEval"
-  type: "coophumaneval"
-  train_split: "test[16:]"
-  eval_split: "test[:16]"
+  name: "OpenMLRL/MBPP"
+  type: "mbpp"
+  train_split: "test[15:65]"
+  eval_split: "test[:15]"
 
 # output
 output:
@@ -30,10 +30,9 @@ external:
   mode: "level_feedback"
   sandbox_slice: 1
 
-# maac
-maac:
+# iac
+iac:
   num_turns: 2
-  critic_type: "v"
   num_train_epochs: 80
   per_device_train_batch_size: 1
   actor_learning_rate: 5.0e-6
@@ -56,6 +55,6 @@ maac:
 wandb:
   project: "comlrl"
   entity: "OpenMLRL"
-  name: "maac_coophumaneval"
+  name: "iac_mbpp"
   dir: "output"
-  tags: ["maac", "coophumaneval", "multi-agent", "turns_2"]
+  tags: ["iac", "mbpp", "multi-agent", "turns_2"]

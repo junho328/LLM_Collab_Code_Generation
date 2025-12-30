@@ -13,10 +13,10 @@ model:
 
 # dataset
 dataset:
-  name: "OpenMLRL/CoopHumanEval"
-  type: "coophumaneval"
-  train_split: "test[16:]"
-  eval_split: "test[:16]"
+  name: "openai/openai_humaneval"
+  type: "humaneval"
+  train_split: "test[33:163]"
+  eval_split: "test[:32]"
 
 # output
 output:
@@ -56,6 +56,6 @@ maac:
 wandb:
   project: "comlrl"
   entity: "OpenMLRL"
-  name: "maac_coophumaneval"
+  name: "maac_humaneval"
   dir: "output"
-  tags: ["maac", "coophumaneval", "multi-agent", "turns_2"]
+  tags: ["maac", "humaneval", "multi-agent", "turns_2"]

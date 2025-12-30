@@ -11,7 +11,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 
 from config import Config, add_config_args, parse_overrides
-from comlrl.trainers.maac import MAACConfig, MAACTrainer
+from comlrl.trainers.iac import IACConfig, IACTrainer
 from comlrl.utils.reward_processor import RewardProcessors
 from rewards.code_rewards import execution_reward_aux
 import external as external_ctx
@@ -159,7 +159,7 @@ def make_prompt_reward_fn(prompt_lookup: Dict[str, Dict[str, str]]):
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Two-turn MAAC (shared critic) training for cooperative code generation."
+        description="Independent Actor-Critic training for cooperative code generation."
     )
     add_config_args(parser)
     args = parser.parse_args()
@@ -170,7 +170,7 @@ def main() -> None:
     if args.config:
         config = Config(args.config)
     else:
-        default_config_path = Path(__file__).parent / "configs" / "maac_che_config.yaml"
+        default_config_path = Path(__file__).parent / "configs" / "iac_che_config.yaml"
         if default_config_path.exists():
             config = Config(str(default_config_path))
         else:
@@ -208,16 +208,16 @@ def main() -> None:
         raise ValueError("dataset.type must be specified or inferrable from dataset.name")
 
     # ------------------------------------------------------------------ #
-    # MAAC-specific config (needed early for seed)
+    # IAC-specific config (needed early for seed)
     # ------------------------------------------------------------------ #
-    maac_cfg = config.get_section("maac") if hasattr(config, "get_section") else {}
-    seed_value = int(config.get("seed", maac_cfg.get("seed", 42)))
+    iac_cfg = config.get_section("iac") if hasattr(config, "get_section") else {}
+    seed_value = int(config.get("seed", iac_cfg.get("seed", 42)))
 
     # ------------------------------------------------------------------ #
     # Output directory handling
     # ------------------------------------------------------------------ #
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
-    output_dir = os.path.join(output_base_dir, f"maac_job_{slurm_job_id}")
+    output_dir = os.path.join(output_base_dir, f"iac_job_{slurm_job_id}")
     os.makedirs(output_dir, exist_ok=True)
     config_save_path = os.path.join(output_dir, "config.yaml")
 
@@ -272,6 +272,7 @@ def main() -> None:
     # External context resolver (for multi-turn transitions)
     # ------------------------------------------------------------------ #
     external_cfg = config.get_section("external") if hasattr(config, "get_section") else {}
+
     def _normalize_prompt(p: str) -> str:
         return " ".join((p or "").split()).strip()
 
@@ -350,7 +351,7 @@ def main() -> None:
 
     external_ctx.set_context_resolver(_resolver)
 
-    # Propagate verbosity to reward/external modules
+    # Propagate verbosity to reward modules
     try:
         import rewards.code_rewards as code_rewards
 
@@ -371,7 +372,7 @@ def main() -> None:
     reward_fn = make_prompt_reward_fn(prompt_lookup)
 
     reward_processor = None
-    shift_val = maac_cfg.get("reward_shift", -4)
+    shift_val = iac_cfg.get("reward_shift", -4)
     if shift_val is not None:
         try:
             shift_val_f = float(shift_val)
@@ -381,26 +382,24 @@ def main() -> None:
             reward_processor = RewardProcessors.shift(value=shift_val_f)
 
     # ------------------------------------------------------------------ #
-    # MAAC-specific config
+    # IAC-specific config
     # ------------------------------------------------------------------ #
-    if "do_sample" in maac_cfg:
-        use_sampling = bool(maac_cfg.get("do_sample"))
+    if "do_sample" in iac_cfg:
+        use_sampling = bool(iac_cfg.get("do_sample"))
     else:
         use_sampling = bool(
-            "temperature" in maac_cfg
-            or "top_p" in maac_cfg
-            or "top_k" in maac_cfg
+            "temperature" in iac_cfg or "top_p" in iac_cfg or "top_k" in iac_cfg
         )
-    top_k = maac_cfg.get("top_k")
-    temperature = maac_cfg.get("temperature", 0.6)
-    top_p = maac_cfg.get("top_p", 0.6)
+    top_k = iac_cfg.get("top_k")
+    temperature = iac_cfg.get("temperature", 0.6)
+    top_p = iac_cfg.get("top_p", 0.6)
+    use_separate_critic = bool(iac_cfg.get("use_separate_critic", True))
     critic_model = (
-        maac_cfg.get("critic_model")
-        or maac_cfg.get("critic_model_name_or_path")
-        or model_name
+        iac_cfg.get("critic_model") or iac_cfg.get("critic_model_name_or_path")
     )
-    num_turns = maac_cfg.get("num_turns", 2)
-    discount = maac_cfg.get("discount", 0.9)
+    num_turns = iac_cfg.get("num_turns", 1)
+
+    rollout_buffer_size = iac_cfg.get("rollout_buffer_size", 8)
 
     external_transition_fn = None
     if num_turns > 1:
@@ -424,7 +423,7 @@ def main() -> None:
                 response_history_per_agent=response_history_per_agent,
             )
 
-    trainer = MAACTrainer(
+    trainer = IACTrainer(
         model=model_name,
         tokenizer=tokenizer,
         reward_func=reward_fn,
@@ -432,37 +431,41 @@ def main() -> None:
         formatters=formatters,
         metrics_callback=None,
         external_transition=external_transition_fn,
-        args=MAACConfig(
-            output_dir=os.path.join(output_dir, "maac"),
-            actor_learning_rate=maac_cfg.get("actor_learning_rate", 5e-6),
-            critic_learning_rate=maac_cfg.get("critic_learning_rate", 5e-6),
-            value_loss_coef=maac_cfg.get("value_loss_coef", 0.6),
-            rollout_buffer_size=maac_cfg.get("rollout_buffer_size", 8),
-            max_new_tokens=maac_cfg.get("max_new_tokens", 256),
+        args=IACConfig(
+            output_dir=os.path.join(output_dir, "iac"),
+            actor_learning_rate=iac_cfg.get("actor_learning_rate", 5e-6),
+            critic_learning_rate=iac_cfg.get("critic_learning_rate", 5e-6),
+            value_loss_coef=iac_cfg.get("value_loss_coef", 0.6),
+            rollout_buffer_size=rollout_buffer_size,
+            max_new_tokens=iac_cfg.get("max_new_tokens", 256),
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
             do_sample=use_sampling,
-            num_train_epochs=maac_cfg.get("num_train_epochs", 40),
-            per_device_train_batch_size=maac_cfg.get("per_device_train_batch_size", 1),
-            num_agents=maac_cfg.get("num_agents", 2),
-            num_return_sequences=1,
+            num_train_epochs=iac_cfg.get("num_train_epochs", 40),
+            per_device_train_batch_size=iac_cfg.get("per_device_train_batch_size", 1),
+            num_agents=iac_cfg.get("num_agents", 2),
+            num_return_sequences=iac_cfg.get("num_return_sequences", 1),
+            use_separate_critic=use_separate_critic,
             critic_model_name_or_path=critic_model,
+            critic_value_head_hidden_dim=iac_cfg.get("critic_value_head_hidden_dim"),
+            value_head_hidden_dim=iac_cfg.get("value_head_hidden_dim"),
+            value_clip_range=iac_cfg.get("value_clip_range", 0.2),
+            entropy_coef=iac_cfg.get("entropy_coef", 0.0),
             num_turns=num_turns,
-            discount=discount,
-            critic_type=maac_cfg.get("critic_type", "v"),
-            early_termination_threshold=maac_cfg.get(
+            discount=iac_cfg.get("discount", 0.9),
+            eval_interval=iac_cfg.get("eval_interval", 16),
+            eval_num_samples=iac_cfg.get("eval_num_samples", 4),
+            early_termination_threshold=iac_cfg.get(
                 "early_termination_threshold", -0.2
             ),
-            eval_interval=maac_cfg.get("eval_interval", 16),
-            eval_num_samples=maac_cfg.get("eval_num_samples", 4),
         ),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         model_config={
             "tokenizer_kwargs": model_config.tokenizer_kwargs,
             "model_kwargs": model_config.model_kwargs,
-            "critic_model_kwargs": maac_cfg.get(
+            "critic_model_kwargs": iac_cfg.get(
                 "critic_model_kwargs", model_config.model_kwargs
             ),
         },
@@ -491,15 +494,15 @@ def _build_wandb_config(
     eval_size: int | None,
 ):
     wandb_section = config.get_section("wandb") if hasattr(config, "get_section") else {}
-    maac_section = config.get_section("maac") if hasattr(config, "get_section") else {}
+    iac_section = config.get_section("iac") if hasattr(config, "get_section") else {}
     output_section = (
         config.get_section("output") if hasattr(config, "get_section") else {}
     )
-    tags = wandb_section.get("tags", ["maac", dataset_name or "code", "turns_2"])
+    tags = wandb_section.get("tags", ["iac", dataset_name or "code", "turns_1"])
     return {
-        "project": wandb_section.get("project", "maac"),
+        "project": wandb_section.get("project", "iac"),
         "entity": wandb_section.get("entity"),
-        "name": wandb_section.get("name", "maac_two_turn"),
+        "name": wandb_section.get("name", "iac_run"),
         "dir": wandb_section.get("dir"),
         "tags": tags,
         "config_sections": {
@@ -512,13 +515,14 @@ def _build_wandb_config(
             },
             "output": output_section,
             "trainer": {
-                "num_turns": maac_section.get("num_turns", 2),
-                "max_new_tokens": maac_section.get("max_new_tokens", 256),
-                "temperature": maac_section.get("temperature", 0.6),
-                "top_p": maac_section.get("top_p", 0.6),
-                "top_k": maac_section.get("top_k"),
-                "discount": maac_section.get("discount", 0.9),
-                "critic_type": maac_section.get("critic_type", "v"),
+                "num_turns": iac_section.get("num_turns", 1),
+                "max_new_tokens": iac_section.get("max_new_tokens", 256),
+                "temperature": iac_section.get("temperature", 0.6),
+                "top_p": iac_section.get("top_p", 0.6),
+                "top_k": iac_section.get("top_k"),
+                "use_separate_critic": iac_section.get(
+                    "use_separate_critic", False
+                ),
             },
         },
     }
