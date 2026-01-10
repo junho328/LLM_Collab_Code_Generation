@@ -434,13 +434,10 @@ def main():
         "joint_mode": magrpo_config.get("joint_mode", "aligned"),
         "termination_threshold": magrpo_config.get("termination_threshold", -0.2),
         "rollout_buffer_size": magrpo_config.get("rollout_buffer_size", 2),
+        "external_prompt_passthrough": True,
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
-    if "external_prompt_passthrough" in magrpo_config:
-        magrpo_args_kwargs["external_prompt_passthrough"] = magrpo_config.get(
-            "external_prompt_passthrough"
-        )
     magrpo_args = MAGRPOConfig(**magrpo_args_kwargs)
 
     # ------------------------------------------------------------------
@@ -521,23 +518,17 @@ def main():
     ]
 
     reward_processor = None
-    # Optional scale
-    if config.get("reward_processor.enabled", False):
-        scale_factor = config.get("reward_processor.scale_factor", 1)
+    if config.get("reward_processor.enabled", True):
+        scale_factor = config.get("reward_processor.scale_factor", 1.0)
         reward_processor = RewardProcessors.scale(factor=scale_factor)
-    # Optional shift via magrpo.reward_shift (default: -4 for code tasks)
-    shift_val = magrpo_config.get("reward_shift", -4)
-    if shift_val is not None:
-        try:
-            shift_val_f = float(shift_val)
-        except (TypeError, ValueError):
-            shift_val_f = None
-        if shift_val_f is not None:
-            shift_proc = RewardProcessors.shift(value=shift_val_f)
-            if reward_processor is None:
-                reward_processor = shift_proc
-            else:
-                # Compose scale then shift
+        shift_val = config.get("reward_processor.shift", None)
+        if shift_val is not None:
+            try:
+                shift_val_f = float(shift_val)
+            except (TypeError, ValueError):
+                shift_val_f = None
+            if shift_val_f is not None:
+                shift_proc = RewardProcessors.shift(value=shift_val_f)
                 prev = reward_processor
                 reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
 
