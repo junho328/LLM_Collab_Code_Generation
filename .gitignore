@@ -162,3 +162,6 @@ $RECYCLE.BIN/
 .directory
 .Trash-*
 .nfs*
+
+wandb/
+*.log
