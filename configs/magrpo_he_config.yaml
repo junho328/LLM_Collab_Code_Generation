@@ -52,9 +52,9 @@ magrpo:
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
-  termination_threshold: -0.2
+  termination_threshold: -2.0
 
-  logging_steps: 50
+  logging_steps: 5
   save_steps: 200
 
 reward_processor:
