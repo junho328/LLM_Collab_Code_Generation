@@ -1,0 +1,60 @@
+model:
+  name: Qwen/Qwen2.5-Coder-1.5B
+  type: qwen
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 2048
+  tokenizer_kwargs:
+    trust_remote_code: true
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: bfloat16
+  special_tokens: {}
+dataset:
+  name: openai/openai_humaneval
+  type: humaneval
+  train_split: test[33:163]
+  eval_split: test[:32]
+seed: 42
+output:
+  base_dir: output
+  save_final_model: false
+  verbose: false
+  log_completions: true
+  log_max_samples_per_file: 10
+external:
+  mode: level_feedback
+  sandbox_slice: 1
+magrpo:
+  num_turns: 1
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  rollout_buffer_size: 64
+  learning_rate: 2.0e-05
+  eval_interval: 4
+  eval_num_samples: 4
+  num_generations: 4
+  max_new_tokens: 256
+  temperature: 0.6
+  top_p: 0.6
+  top_k: null
+  joint_mode: aligned
+  num_agents: 2
+  discount: 0.9
+  termination_threshold: -0.2
+  logging_steps: 50
+  save_steps: 200
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -4
+wandb:
+  project: MA-GRPO-Code
+  entity: namhokoh-korea-advanced-institute-of-science-and-technology
+  name: magrpo_he_shared_qwen2.5-1.5B
+  dir: output
+  tags:
+  - magrpo
+  - humaneval
+  - multi-agent
+  - turn_1

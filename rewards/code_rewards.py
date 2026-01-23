@@ -6,6 +6,19 @@ import builtins
 # Verbose toggle (can be set by training scripts)
 VERBOSE = True
 
+# Global step counter for logging (set by training scripts)
+_GLOBAL_STEP = 0
+_CURRENT_PHASE = "train"
+_CURRENT_TURN = 1
+
+
+def set_logging_context(step: int = 0, phase: str = "train", turn: int = 1):
+    """Set the current logging context (called by training scripts)."""
+    global _GLOBAL_STEP, _CURRENT_PHASE, _CURRENT_TURN
+    _GLOBAL_STEP = step
+    _CURRENT_PHASE = phase
+    _CURRENT_TURN = turn
+
 from rewards.code_utils import (
     TimeoutException,
     check_aux_call_without_assignment,
@@ -140,6 +153,25 @@ def execution_reward_aux(
         if not level1_passed:
             print("⏹️  STOPPING: Function definition requirements not met")
             print(f"Final reward: {reward}")
+            # Log completion to file
+            try:
+                from loggers.completion_logger import log_completion
+                log_completion(
+                    entry_point=entry_point,
+                    aux_completion=c1,
+                    main_completion=c2,
+                    aux_cleaned=c1_clean,
+                    main_cleaned=c2_clean,
+                    aux_extracted=aux_func or "",
+                    main_extracted=main_func or "",
+                    reward=reward,
+                    level1_reward=0.4 if aux_check_passed else 0.0,
+                    phase=_CURRENT_PHASE,
+                    turn=_CURRENT_TURN,
+                    step=_GLOBAL_STEP,
+                )
+            except Exception:
+                pass
             rewards.append(reward)
             continue
 
@@ -166,6 +198,26 @@ def execution_reward_aux(
             print(f"❌ {syntax_message}")
             print("⏹️  STOPPING: Syntax requirements not met")
             print(f"Final reward: {reward}")
+            # Log completion to file
+            try:
+                from loggers.completion_logger import log_completion
+                log_completion(
+                    entry_point=entry_point,
+                    aux_completion=c1,
+                    main_completion=c2,
+                    aux_cleaned=c1_clean,
+                    main_cleaned=c2_clean,
+                    aux_extracted=aux_func or "",
+                    main_extracted=main_func or "",
+                    reward=reward,
+                    level1_reward=0.4 if aux_check_passed else 0.0,
+                    level2_reward=0.0,
+                    phase=_CURRENT_PHASE,
+                    turn=_CURRENT_TURN,
+                    step=_GLOBAL_STEP,
+                )
+            except Exception:
+                pass
             rewards.append(reward)
             continue
 
@@ -179,6 +231,26 @@ def execution_reward_aux(
         test_cases_list = extract_test_cases(test_code, entry_point)
         if not test_cases_list:
             print("❌ No test cases found")
+            # Log completion to file
+            try:
+                from loggers.completion_logger import log_completion
+                log_completion(
+                    entry_point=entry_point,
+                    aux_completion=c1,
+                    main_completion=c2,
+                    aux_cleaned=c1_clean,
+                    main_cleaned=c2_clean,
+                    aux_extracted=aux_func or "",
+                    main_extracted=main_func or "",
+                    reward=reward,
+                    level1_reward=0.4 if aux_check_passed else 0.0,
+                    level2_reward=0.5,
+                    phase=_CURRENT_PHASE,
+                    turn=_CURRENT_TURN,
+                    step=_GLOBAL_STEP,
+                )
+            except Exception:
+                pass
             rewards.append(reward)
             continue
 
@@ -374,6 +446,31 @@ def execution_reward_aux(
                 )
 
         print(f"\n🏆 FINAL REWARD: {reward} / 4.0")
+        
+        # Log completion to file if logger is initialized
+        try:
+            from loggers.completion_logger import log_completion
+            log_completion(
+                entry_point=entry_point,
+                aux_completion=c1,
+                main_completion=c2,
+                aux_cleaned=c1_clean,
+                main_cleaned=c2_clean,
+                aux_extracted=aux_func or "",
+                main_extracted=main_func or "",
+                reward=reward,
+                level1_reward=0.4 if aux_check_passed else 0.0,
+                level2_reward=0.5 if syntax_passed else 0.0,
+                level3_reward=reward - (0.4 if aux_check_passed else 0.0) - (0.5 if syntax_passed else 0.0) - (0.6 if main_check_passed else 0.0),
+                passed_tests=passed_tests if 'passed_tests' in dir() else 0,
+                total_tests=total_tests if 'total_tests' in dir() else 0,
+                phase=_CURRENT_PHASE,
+                turn=_CURRENT_TURN,
+                step=_GLOBAL_STEP,
+            )
+        except Exception:
+            pass  # Silently ignore if logger not available
+        
         rewards.append(reward)
 
     return rewards

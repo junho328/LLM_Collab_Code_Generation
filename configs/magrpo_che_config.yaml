@@ -1,6 +1,6 @@
 # model
 model:
-  name: "Qwen/Qwen2.5-Coder-3B"
+  name: "Qwen/Qwen2.5-Coder-1.5B"
   type: "qwen"
   temperature: 0.7
   top_p: 0.9
@@ -26,6 +26,8 @@ output:
   base_dir: "output"
   save_final_model: false
   verbose: false
+  log_completions: true  # Enable completion logging to JSON files
+  log_max_samples_per_file: 10  # Max samples per log file before rotation
 
 # external
 external:
@@ -34,10 +36,10 @@ external:
 
 # magrpo
 magrpo:
-  num_turns: 2
-  num_train_epochs: 8
+  num_turns: 1
+  num_train_epochs: 4
   per_device_train_batch_size: 1
-  rollout_buffer_size: 4
+  rollout_buffer_size: 64
   learning_rate: 2.0e-5
   eval_interval: 4
   eval_num_samples: 4
@@ -57,11 +59,11 @@ magrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -4
+  shift: 0.0
 # wandb
 wandb:
-  project: "comlrl"
-  entity: "OpenMLRL"
-  name: "magrpo_coophumaneval"
+  project: "MA-GRPO-Code"
+  entity: "namhokoh-korea-advanced-institute-of-science-and-technology"
+  name: "magrpo_che_shared_qwen2.5-1.5B"
   dir: "output"
   tags: ["magrpo", "coophumaneval", "multi-agent", "turns_2"]

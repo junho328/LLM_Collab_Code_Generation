@@ -508,14 +508,29 @@ def main():
     except Exception:
         pass
 
+    # Initialize completion logger if enabled in config
+    completion_log_enabled = config.get("output.log_completions", False)
+    if completion_log_enabled:
+        try:
+            from loggers.completion_logger import CompletionLogger
+            max_samples = config.get("output.log_max_samples_per_file", 100)
+            CompletionLogger.initialize(
+                output_dir=output_dir,
+                enabled=True,
+                max_samples_per_file=max_samples,
+            )
+            if output_verbose:
+                print(f"Completion logging enabled. Logs will be saved to: {output_dir}/completion_logs/")
+        except Exception as e:
+            print(f"Warning: Failed to initialize completion logger: {e}")
+
     # Use num_agents from magrpo config (where it belongs for MAGRPO training)
-    agents = [
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            **model_config.model_kwargs,
-        )
-        for _ in range(num_agents)
-    ]
+    # Create a single shared model for all agents (same model instance)
+    shared_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        **model_config.model_kwargs,
+    )
+    agents = [shared_model for _ in range(num_agents)]
 
     reward_processor = None
     if config.get("reward_processor.enabled", True):
@@ -587,6 +602,21 @@ def main():
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
     trainer.train()
+    
+    # Flush completion logger at the end of training
+    if completion_log_enabled:
+        try:
+            from loggers.completion_logger import CompletionLogger
+            logger = CompletionLogger.get_instance()
+            if logger:
+                logger.flush()
+                stats = logger.get_stats()
+                if output_verbose:
+                    print(f"Completion logging complete. Total samples logged: {stats['total_logged']}")
+                    print(f"Log files saved to: {stats['log_dir']}")
+        except Exception:
+            pass
+    
     save_final = config.get("output.save_final_model", False)
     if save_final:
         save_path = config.get(
