@@ -112,6 +112,29 @@ def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
 
     return prompt_text
 
+def infer_prompt(prompt, entry_point) -> str:
+
+    inference_prompt= f"""You are working on a collaborative coding task. Your partner will create a helper function to assist with the main problem.
+
+Problem: 
+{prompt}
+
+Your task: Predict what helper function your partner would create to help solve this problem
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Do NOT redefine the aux() function
+- Implement ONLY the '{entry_point}' function as specified
+- You can call aux() to assign value to a variable within your function if helpful
+
+Your output should follow this format:
+
+def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+
+    return prompt_text
 
 def get_formatters(dataset_type: str, num_agents: int):
     """Get a list of per-agent formatters based on dataset type and agent count.
