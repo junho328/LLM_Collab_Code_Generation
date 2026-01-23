@@ -90,7 +90,7 @@ def main_function_formatter(example: Dict[str, Any]) -> str:
 
     params_str = ", ".join(params)
 
-    prompt_text = f"""Solve this coding problem by implementing the required function.
+    prompt_text = f"""Now, solve this coding problem by implementing the required function.
 
 Problem:
 {prompt}
