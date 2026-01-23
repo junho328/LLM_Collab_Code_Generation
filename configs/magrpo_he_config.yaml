@@ -52,7 +52,7 @@ magrpo:
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
-  termination_threshold: -0.2
+  termination_threshold: -2.0
 
   # Theory of Mind (ToM) settings
   # When enabled, Agent 2 first predicts Agent 1's auxiliary function,
@@ -60,7 +60,7 @@ magrpo:
   enable_tom: false  # Set to true to enable ToM
   tom_max_new_tokens: 256  # Max tokens for ToM inference
 
-  logging_steps: 10
+  logging_steps: 5
   save_steps: 200
 
 reward_processor:
