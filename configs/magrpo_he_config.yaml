@@ -54,7 +54,13 @@ magrpo:
   discount: 0.9
   termination_threshold: -0.2
 
-  logging_steps: 50
+  # Theory of Mind (ToM) settings
+  # When enabled, Agent 2 first predicts Agent 1's auxiliary function,
+  # then uses this prediction to inform its main function implementation
+  enable_tom: false  # Set to true to enable ToM
+  tom_max_new_tokens: 256  # Max tokens for ToM inference
+
+  logging_steps: 10
   save_steps: 200
 
 reward_processor:
@@ -65,6 +71,6 @@ reward_processor:
 wandb:
   project: "MA-GRPO-Code"
   entity: "namhokoh-korea-advanced-institute-of-science-and-technology"
-  name: "magrpo_he_shared_qwen2.5-1.5B"
+  name: "agent_chaining_he_shared_qwen2.5-1.5B"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent", "turn_1"]

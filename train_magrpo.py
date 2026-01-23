@@ -309,6 +309,13 @@ def main():
     temperature = magrpo_config.get("temperature", 0.6)
     top_p = magrpo_config.get("top_p", 0.6)
 
+    # Theory of Mind (ToM) settings
+    enable_tom = magrpo_config.get("enable_tom", False)
+    tom_max_new_tokens = magrpo_config.get("tom_max_new_tokens", 128)
+
+    if output_verbose and enable_tom:
+        print(f"Theory of Mind enabled: tom_max_new_tokens={tom_max_new_tokens}")
+
     # ------------------------------------------------------------------
     # Config: External transitions (mode, sandbox, expert model, context flags)
     # ------------------------------------------------------------------
@@ -435,6 +442,9 @@ def main():
         "termination_threshold": magrpo_config.get("termination_threshold", -0.2),
         "rollout_buffer_size": magrpo_config.get("rollout_buffer_size", 2),
         "external_prompt_passthrough": True,
+        # Theory of Mind (ToM) parameters
+        "enable_tom": enable_tom,
+        "tom_max_new_tokens": tom_max_new_tokens,
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
