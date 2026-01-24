@@ -526,11 +526,17 @@ def main():
 
     # Use num_agents from magrpo config (where it belongs for MAGRPO training)
     # Create a single shared model for all agents (same model instance)
+        # Enable Flash Attention 2 if not explicitly disabled in config
+    model_load_kwargs = dict(model_config.model_kwargs)
+    if "attn_implementation" not in model_load_kwargs:
+        model_load_kwargs["attn_implementation"] = "flash_attention_2"
+    
     shared_model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        **model_config.model_kwargs,
+        **model_load_kwargs,
     )
     agents = [shared_model for _ in range(num_agents)]
+
 
     reward_processor = None
     if config.get("reward_processor.enabled", True):
