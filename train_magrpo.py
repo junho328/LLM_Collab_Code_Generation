@@ -236,10 +236,9 @@ def main():
     
 
     # ------------------------------------------------------------------
-    # Config: model, dataset, output
+    # Config: models (heterogeneous agents), dataset, output
     # ------------------------------------------------------------------
-    model_config = config.get_model_config()
-    model_name = model_config.name
+    model_configs = config.get_models_config()
     dataset_name = config.get("dataset.name")
     dataset_type = config.get("dataset.type")
     output_base_dir = config.get("output.base_dir")
@@ -271,6 +270,13 @@ def main():
     num_turns = magrpo_config.get("num_turns", 2)
     num_agents = magrpo_config.get("num_agents", 2)
     is_multi_turn = num_turns > 1
+
+    # Validate that number of models matches num_agents
+    if len(model_configs) != num_agents:
+        raise ValueError(
+            f"Number of models in config ({len(model_configs)}) must match "
+            f"num_agents ({num_agents})"
+        )
     output_verbose = config.get("output.verbose", False)
     if output_verbose:
         print(f"Multi-turn training enabled: num_turns={num_turns}") if is_multi_turn else print(
@@ -303,31 +309,43 @@ def main():
         print(f"Error loading dataset: {e}")
         return
 
+    # ------------------------------------------------------------------
+    # Load heterogeneous models and tokenizers for each agent
+    # ------------------------------------------------------------------
     if output_verbose:
-        print(f"\nUsing model: {model_name}")
-        print(f"Model type: {model_config.type}")
-        print(f"Max context window: {model_config.max_length} tokens")
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name, **model_config.tokenizer_kwargs
-    )
-
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        print(f"\nLoading {num_agents} heterogeneous agents:")
+        for i, mc in enumerate(model_configs):
+            print(f"  Agent {i}: {mc.name} (type: {mc.type})")
 
     padding_side = config.get("tokenizer.padding_side")
-    if padding_side:
-        tokenizer.padding_side = padding_side
-
-    # Add special tokens if needed (e.g., FIM tokens for StarCoder)
-    if model_config.special_tokens:
+    
+    agents = []
+    tokenizers = []
+    for agent_idx, mc in enumerate(model_configs):
         if output_verbose:
-            print("Adding special tokens...")
-        tokenizer.add_special_tokens(model_config.special_tokens)
+            print(f"\nLoading Agent {agent_idx}: {mc.name}")
+        
+        # Load tokenizer for this agent
+        tokenizer = AutoTokenizer.from_pretrained(mc.name, **mc.tokenizer_kwargs)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        if padding_side:
+            tokenizer.padding_side = padding_side
+        
+        # Add special tokens if needed
+        if mc.special_tokens:
+            if output_verbose:
+                print(f"  Adding special tokens for Agent {agent_idx}...")
+            tokenizer.add_special_tokens(mc.special_tokens)
+        
+        tokenizers.append(tokenizer)
+        
+        # Load model for this agent
+        model = AutoModelForCausalLM.from_pretrained(mc.name, **mc.model_kwargs)
+        agents.append(model)
+        
         if output_verbose:
-            print(
-                f"Special tokens added: {model_config.special_tokens.get('additional_special_tokens', [])}"
-            )
+            print(f"  Agent {agent_idx} loaded: {mc.name}")
 
     temperature = magrpo_config.get("temperature", 0.6)
     top_p = magrpo_config.get("top_p", 0.6)
@@ -500,7 +518,7 @@ def main():
 
     # Collect full config sections for W&B searchability
     dataset_section = config.get_section("dataset") if hasattr(config, "get_section") else {}
-    model_section = config.get_section("model") if hasattr(config, "get_section") else {}
+    models_section = config.get_section("models") if hasattr(config, "get_section") else []
     output_section = config.get_section("output") if hasattr(config, "get_section") else {}
 
     wandb_config = {
@@ -512,7 +530,7 @@ def main():
         # Provide full sections for the trainer to log cleanly
         "config_sections": {
             "dataset": dataset_section,
-            "model": model_section,
+            "models": models_section,  # heterogeneous models list
             "output": output_section,
             "external": external_cfg,
             "trainer": magrpo_config,
@@ -531,14 +549,7 @@ def main():
     except Exception:
         pass
 
-    # Use num_agents from magrpo config (where it belongs for MAGRPO training)
-    agents = [
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            **model_config.model_kwargs,
-        )
-        for _ in range(num_agents)
-    ]
+    # agents and tokenizers already loaded above (heterogeneous models)
 
     reward_processor = None
     if config.get("reward_processor.enabled", True):
@@ -559,10 +570,10 @@ def main():
     # Build trainer kwargs (grouped: model/data, reward/formatting, logging, args)
     # ------------------------------------------------------------------
     trainer_kwargs = {
-        # Model / data
+        # Model / data (heterogeneous agents with per-agent tokenizers)
         "agents": agents,
         "num_agents": num_agents,
-        "tokenizer": tokenizer,
+        "tokenizers": tokenizers,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
         # Reward / formatting

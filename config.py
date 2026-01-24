@@ -6,7 +6,7 @@ Handles YAML loading and model configuration.
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -76,6 +76,17 @@ class Config:
         if not model_section:
             raise ValueError("No 'model' section found in configuration")
         return ModelConfig.from_dict(model_section)
+
+    def get_models_config(self) -> List[ModelConfig]:
+        """Get list of model configurations for heterogeneous agents.
+        
+        Returns:
+            List of ModelConfig objects, one per agent.
+        """
+        models_section = self.get_section("models")
+        if not models_section or not isinstance(models_section, list):
+            raise ValueError("No 'models' list found in configuration")
+        return [ModelConfig.from_dict(m) for m in models_section]
 
     def update(self, updates: Dict[str, Any]):
         """Update configuration with new values (deep merge)."""
