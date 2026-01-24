@@ -1,7 +1,7 @@
 # models (heterogeneous agents - each agent uses a different model)
 models:
   # Agent 0: Auxiliary function generator
-  - name: "Qwen/Qwen2.5-Coder-3B"
+  - name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
     type: "qwen"
     temperature: 0.7
     top_p: 0.9
@@ -12,8 +12,7 @@ models:
       trust_remote_code: true
       torch_dtype: "bfloat16"
     special_tokens: {}
-  # Agent 1: Main function generator
-  - name: "bigcode/starcoder2-3b"
+  - name: "/home/work/aipr-jhna/huggingface_hub/starcoder2-3b"
     type: "gpt"
     temperature: 0.7
     top_p: 0.9
@@ -24,6 +23,18 @@ models:
       trust_remote_code: true
       torch_dtype: "bfloat16"
     special_tokens: {}
+  # Agent 1: Main function generator
+  # - name: "bigcode/starcoder2-3b"
+  #   type: "gpt"
+  #   temperature: 0.7
+  #   top_p: 0.9
+  #   max_length: 2048
+  #   tokenizer_kwargs:
+  #     trust_remote_code: true
+  #   model_kwargs:
+  #     trust_remote_code: true
+  #     torch_dtype: "bfloat16"
+  #   special_tokens: {}
 
 # dataset
 dataset:
@@ -36,7 +47,7 @@ seed: 42
 
 # output
 output:
-  base_dir: "/home/work/aipr-jhna/output/comlrl_output/qwen_star/"
+  base_dir: "/home/work/aipr-jhna/output/comlrl_output/agent1-qwen_agent2-star/"
   save_final_model: false
   verbose: false
 
@@ -47,10 +58,10 @@ external:
 
 # magrpo
 magrpo:
-  num_turns: 2
-  num_train_epochs: 6
+  num_turns: 1
+  num_train_epochs: 4
   per_device_train_batch_size: 1
-  rollout_buffer_size: 2
+  rollout_buffer_size: 512
   learning_rate: 2.0e-5
   eval_interval: 4
   eval_num_samples: 4
@@ -64,7 +75,7 @@ magrpo:
   discount: 0.9
   termination_threshold: -0.2
 
-  logging_steps: 50
+  logging_steps: 1
   save_steps: 200
 
 reward_processor:
@@ -73,8 +84,8 @@ reward_processor:
   shift: -4
 # wandb
 wandb:
-  project: "comlrl"
-  entity: "OpenMLRL"
-  name: "magrpo_humaneval"
+  project: "MAGRPO-Code-different"
+  entity: "contrl"
+  name: "magrpo_humaneval_agent1-qwen_agent2-star"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]

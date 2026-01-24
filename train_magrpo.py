@@ -211,6 +211,10 @@ def get_reward_function(dataset_type: str, num_agents: int):
 
 def main():
     """Main function to run the unified MAGRPO training."""
+    # Determine if this is the main process (for distributed training)
+    local_rank = os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0"))
+    is_main_process = local_rank == "0" or local_rank == ""
+
     parser = argparse.ArgumentParser(
         description="Train MAGRPO with configurable dataset (single-turn or multi-turn)"
     )
@@ -255,7 +259,8 @@ def main():
             raise ValueError(
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
             )
-        print(f"Dataset type not specified, inferred as: {dataset_type}")
+        if is_main_process:
+            print(f"Dataset type not specified, inferred as: {dataset_type}")
 
     train_split = config.get("dataset.train_split")
     eval_split = config.get("dataset.eval_split")
@@ -278,10 +283,11 @@ def main():
             f"num_agents ({num_agents})"
         )
     output_verbose = config.get("output.verbose", False)
-    if output_verbose:
-        print(f"Multi-turn training enabled: num_turns={num_turns}") if is_multi_turn else print(
-            f"Single-turn training: num_turns={num_turns}"
-        )
+    if output_verbose and is_main_process:
+        if is_multi_turn:
+            print(f"Multi-turn training enabled: num_turns={num_turns}")
+        else:
+            print(f"Single-turn training: num_turns={num_turns}")
 
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
 
@@ -306,13 +312,14 @@ def main():
         eval_dataset = load_dataset(dataset_name, split=eval_split)
 
     except Exception as e:
-        print(f"Error loading dataset: {e}")
+        if is_main_process:
+            print(f"Error loading dataset: {e}")
         return
 
     # ------------------------------------------------------------------
     # Load heterogeneous models and tokenizers for each agent
     # ------------------------------------------------------------------
-    if output_verbose:
+    if output_verbose and is_main_process:
         print(f"\nLoading {num_agents} heterogeneous agents:")
         for i, mc in enumerate(model_configs):
             print(f"  Agent {i}: {mc.name} (type: {mc.type})")
@@ -322,7 +329,7 @@ def main():
     agents = []
     tokenizers = []
     for agent_idx, mc in enumerate(model_configs):
-        if output_verbose:
+        if output_verbose and is_main_process:
             print(f"\nLoading Agent {agent_idx}: {mc.name}")
         
         # Load tokenizer for this agent
@@ -334,7 +341,7 @@ def main():
         
         # Add special tokens if needed
         if mc.special_tokens:
-            if output_verbose:
+            if output_verbose and is_main_process:
                 print(f"  Adding special tokens for Agent {agent_idx}...")
             tokenizer.add_special_tokens(mc.special_tokens)
         
@@ -344,7 +351,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(mc.name, **mc.model_kwargs)
         agents.append(model)
         
-        if output_verbose:
+        if output_verbose and is_main_process:
             print(f"  Agent {agent_idx} loaded: {mc.name}")
 
     temperature = magrpo_config.get("temperature", 0.6)
@@ -627,7 +634,8 @@ def main():
             "output.save_path", os.path.join(output_dir, "final_model")
         )
         trainer.save_model(save_path)
-        print(f"Model saved to: {save_path}")
+        if is_main_process:
+            print(f"Model saved to: {save_path}")
 
 
 if __name__ == "__main__":
