@@ -347,8 +347,13 @@ def main():
         
         tokenizers.append(tokenizer)
         
+        model_load_kwargs = dict(mc.model_kwargs)
+        if "attn_implementation" not in model_load_kwargs:
+            model_load_kwargs["attn_implementation"] = "flash_attention_2"
+                
+        
         # Load model for this agent
-        model = AutoModelForCausalLM.from_pretrained(mc.name, **mc.model_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(mc.name, **model_load_kwargs)
         agents.append(model)
         
         if output_verbose and is_main_process:

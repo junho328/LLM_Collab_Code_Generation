@@ -47,7 +47,7 @@ seed: 42
 
 # output
 output:
-  base_dir: "/home/work/aipr-jhna/output/comlrl_output/agent1-qwen_agent2-star/"
+  base_dir: "/home/work/aipr-jhna/output/comlrl_output/agent1-qwen_agent2-star_shift-2/"
   save_final_model: false
   verbose: false
 
@@ -81,11 +81,11 @@ magrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -4
+  shift: -2
 # wandb
 wandb:
   project: "MAGRPO-Code-different"
   entity: "contrl"
-  name: "magrpo_humaneval_agent1-qwen_agent2-star"
+  name: "magrpo_humaneval_agent1-qwen_agent2-star_shift-2"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]
