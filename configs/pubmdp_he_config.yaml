@@ -1,0 +1,141 @@
+# PuB-MDP Configuration for HumanEval Dataset
+# 
+# This configuration trains a Public Agent that learns to generate prescriptions
+# (specifications) for two frozen worker agents in a collaborative code generation task.
+#
+# Features:
+# - Separate model configurations for Public Agent and Worker Agents
+# - Flash Attention 2 support for faster inference
+# - Multi-GPU data parallelism support
+# - Parallel generation and reward computation
+#
+# Usage:
+#   Single GPU:  python train_pubmdp.py --config configs/pubmdp_he_config.yaml
+#   Multi-GPU:   torchrun --nproc_per_node=4 train_pubmdp.py --config configs/pubmdp_he_config.yaml
+
+# Random seed for reproducibility
+seed: 42
+
+# Default Model Configuration (used as fallback if not overridden)
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
+  type: "qwen"
+  max_length: 2048
+  model_kwargs:
+    torch_dtype: "bfloat16"  # Required for Flash Attention 2
+    trust_remote_code: true
+  tokenizer_kwargs:
+    trust_remote_code: true
+
+# Tokenizer Configuration
+tokenizer:
+  padding_side: "left"
+
+# Dataset Configuration
+dataset:
+  name: "/home/work/aipr-jhna/huggingface_hub/openai_humaneval"
+  type: "humaneval"
+  train_split: "test[33:163]"
+  eval_split: "test[:32]"
+
+# Output Configuration
+output:
+  base_dir: "/home/work/aipr-jhna/output/pubmdp"
+  verbose: false
+  save_final_model: true
+  save_path: "/final_model"
+
+# PuB-MDP Training Configuration
+pubmdp:
+  # =========================================
+  # Model Selection - Separate Configurations
+  # =========================================
+  
+  # Public Agent model (trainable) - learns to generate prescriptions
+  public_model: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
+  
+  # Worker Agent model - executes code generation based on prescriptions
+  # Can be a different model from public_model
+  worker_model: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
+  
+  # =========================================
+  # Worker Training Options
+  # =========================================
+  # Set to true to also train worker agents (not just Public Agent)
+  train_workers: false
+  
+  # Learning rate for worker agents (if train_workers is true)
+  # If null/not set, uses same learning rate as public agent
+  worker_learning_rate: null  # e.g., 1.0e-6
+  
+  # Optional: Override model configurations for each agent type
+  # public_model_config:
+  #   model_kwargs:
+  #     torch_dtype: "bfloat16"
+  #     trust_remote_code: true
+  #   tokenizer_kwargs:
+  #     trust_remote_code: true
+  
+  # worker_model_config:
+  #   model_kwargs:
+  #     torch_dtype: "bfloat16"
+  #     trust_remote_code: true
+  #   tokenizer_kwargs:
+  #     trust_remote_code: true
+  
+  # =========================================
+  # Flash Attention 2 Configuration
+  # =========================================
+  use_flash_attention: true  # Enable Flash Attention 2 for faster inference
+  
+  # =========================================
+  # Training Parameters
+  # =========================================
+  num_train_epochs: 4
+  per_device_train_batch_size: 1  # Can be >1 with parallelization
+  learning_rate: 5.0e-6
+  
+  # Logging and checkpointing
+  logging_steps: 10
+  save_steps: 200
+  
+  # Evaluation
+  eval_interval: 4
+  eval_num_samples: 4
+  
+  # =========================================
+  # GRPO Sampling
+  # =========================================
+  num_generations: 4  # Number of prescription groups per task
+  
+  # Token limits
+  max_prescription_tokens: 256  # Max tokens for prescription generation
+  max_code_tokens: 256  # Max tokens for code generation
+  
+  # Generation parameters
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 50
+  
+  # =========================================
+  # Parallelization Configuration
+  # =========================================
+  rollout_buffer_size: 4  # Number of samples before update
+  num_reward_workers: 32  # Parallel workers for reward computation
+
+# Reward Processing
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: 0.0
+
+# Weights & Biases Configuration
+wandb:
+  project: "pubmdp-coding"
+  entity: "contrl"
+  name: "pubmdp_he_public-qwen3b_worker-qwen1.5b"
+  dir: "./wandb"
+  tags:
+    - "pubmdp"
+    - "humaneval"
+    - "code-generation"

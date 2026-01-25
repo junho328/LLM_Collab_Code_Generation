@@ -1,13 +1,114 @@
 import re
-import signal
-from typing import List
+from typing import List, Tuple, Dict, Any
 import builtins
+import multiprocessing as mp
+from multiprocessing import Process, Queue
+import queue  # for queue.Empty exception
 
 # Verbose toggle (can be set by training scripts)
-VERBOSE = True
+VERBOSE = False
+
+# Default timeout for individual tests (seconds)
+DEFAULT_TEST_TIMEOUT = 5
+
+
+def _run_test_in_process(
+    combined_code: str,
+    test_case: str,
+    result_queue: Queue,
+) -> None:
+    """
+    Run a single test case in a separate process.
+    This allows true timeout via process termination.
+    """
+    try:
+        # Create fresh execution environment
+        exec_globals = {}
+        exec(combined_code, exec_globals)
+        
+        # Parse the test case
+        test_match = re.search(
+            r"assert\s+(\w+)\(([^)]*)\)\s*==\s*(.+)", test_case
+        )
+        
+        result_info = {"test_match": None, "actual": None, "expected": None}
+        
+        if test_match:
+            func_name = test_match.group(1)
+            func_args = test_match.group(2)
+            expected_result = test_match.group(3)
+            
+            func_call = f"{func_name}({func_args})"
+            actual_result = eval(func_call, exec_globals)
+            expected_result_eval = eval(expected_result, exec_globals)
+            
+            result_info["test_match"] = True
+            result_info["actual"] = repr(actual_result)
+            result_info["expected"] = repr(expected_result_eval)
+            result_info["func_call"] = func_call
+            
+            # Run the actual assertion
+            exec(test_case, exec_globals)
+            result_queue.put(("success", result_info))
+        else:
+            # Fallback if parsing fails
+            exec(test_case, exec_globals)
+            result_queue.put(("success", result_info))
+            
+    except AssertionError as e:
+        result_queue.put(("assertion_error", str(e), result_info if 'result_info' in dir() else {}))
+    except Exception as e:
+        result_queue.put(("error", str(e)))
+
+
+def run_test_with_timeout(
+    combined_code: str,
+    test_case: str,
+    timeout: int = DEFAULT_TEST_TIMEOUT,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Run a test case with true process-based timeout.
+    
+    Returns:
+        Tuple of (status, result_info) where status is one of:
+        - "success": test passed
+        - "timeout": test timed out
+        - "assertion_error": assertion failed
+        - "error": other error
+    """
+    # Use 'spawn' context to avoid issues with forked processes
+    ctx = mp.get_context('spawn')
+    result_queue = ctx.Queue()
+    
+    process = ctx.Process(
+        target=_run_test_in_process,
+        args=(combined_code, test_case, result_queue),
+    )
+    process.start()
+    process.join(timeout=timeout)
+    
+    if process.is_alive():
+        # Timeout - kill the process
+        process.terminate()
+        process.join(timeout=1)
+        if process.is_alive():
+            process.kill()
+            process.join()
+        return ("timeout", {})
+    
+    # Process finished - get result
+    try:
+        result = result_queue.get_nowait()
+        if result[0] == "success":
+            return ("success", result[1])
+        elif result[0] == "assertion_error":
+            return ("assertion_error", {"error": result[1], "info": result[2] if len(result) > 2 else {}})
+        else:
+            return ("error", {"error": result[1]})
+    except queue.Empty:
+        return ("error", {"error": "No result from process"})
 
 from rewards.code_utils import (
-    TimeoutException,
     check_aux_call_without_assignment,
     check_aux_function_usage,
     check_function_definition,
@@ -18,7 +119,6 @@ from rewards.code_utils import (
     extract_specific_function,
     extract_test_cases,
     is_wrapper_function,
-    timeout_handler,
 )
 
 
@@ -192,13 +292,18 @@ def execution_reward_aux(
         timeout_count = 0  # Track number of timeouts
         MAX_TIMEOUTS = 3  # Stop testing after 3 timeouts
 
+        # First, verify that combined code can be loaded (quick syntax check)
         try:
-            # Create execution environment (no timeout needed for function definitions)
             exec_globals = {}
             exec(combined_code, exec_globals)
             print("✅ Code definitions loaded successfully")
+            code_loadable = True
+        except Exception as e:
+            print(f"❌ Code loading failed: {str(e)}")
+            code_loadable = False
 
-            # Run individual test cases WITH INDIVIDUAL TIMEOUTS
+        if code_loadable:
+            # Run individual test cases WITH PROCESS-BASED TIMEOUTS
             for i, test_case in enumerate(test_cases_list):
                 # Check if we should stop testing due to too many timeouts
                 if timeout_count >= MAX_TIMEOUTS:
@@ -210,73 +315,41 @@ def execution_reward_aux(
                     print("⚠️  No bonuses will be awarded due to excessive timeouts")
                     break
 
-                try:
-                    # SET TIMEOUT FOR EACH TEST INDIVIDUALLY
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(TEST_TIMEOUT)
+                print(f"🧪 Running Test {i + 1}: {test_case}")
 
-                    print(f"🧪 Running Test {i + 1}: {test_case}")
+                # Run test in separate process with true timeout
+                status, result_info = run_test_with_timeout(
+                    combined_code, test_case, timeout=TEST_TIMEOUT
+                )
 
-                    # Parse the test case to extract the function call and expected result
-                    test_match = re.search(
-                        r"assert\s+(\w+)\(([^)]*)\)\s*==\s*(.+)", test_case
-                    )
-                    if test_match:
-                        func_name = test_match.group(1)
-                        func_args = test_match.group(2)
-                        expected_result = test_match.group(3)
+                if status == "success":
+                    if result_info.get("test_match"):
+                        print(f"   📞 Function call: {result_info.get('func_call')}")
+                        print(f"   🎯 Expected: {result_info.get('expected')}")
+                        print(f"   📤 Actual: {result_info.get('actual')}")
+                    passed_tests += 1
+                    print(f"✅ Test {i + 1}: PASSED")
 
-                        # Execute the function call to get actual result
-                        func_call = f"{func_name}({func_args})"
-                        actual_result = eval(func_call, exec_globals)
-                        expected_result_eval = eval(expected_result, exec_globals)
-
-                        print(f"   📞 Function call: {func_call}")
-                        print(f"   🎯 Expected: {expected_result_eval}")
-                        print(f"   📤 Actual: {actual_result}")
-
-                        # Execute the actual test
-                        exec(test_case, exec_globals)
-                        passed_tests += 1
-                        print(f"✅ Test {i + 1}: PASSED")
-                    else:
-                        # Fallback if parsing fails
-                        exec(test_case, exec_globals)
-                        passed_tests += 1
-                        print(f"✅ Test {i + 1}: PASSED")
-
-                    # CLEAR TIMEOUT AFTER SUCCESSFUL TEST
-                    signal.alarm(0)
-
-                except TimeoutException:
-                    signal.alarm(0)  # Clear timeout
+                elif status == "timeout":
                     timeout_count += 1
                     print(
                         f"⏰ Test {i + 1}: TIMEOUT after {TEST_TIMEOUT} seconds (timeout #{timeout_count})"
                     )
                     print("⚠️  Likely infinite recursion or infinite loop in function")
 
-                except AssertionError as e:
-                    signal.alarm(0)  # Clear timeout
-                    # Try to show more details about the assertion failure
-                    if (
-                        "test_match" in locals()
-                        and test_match
-                        and "actual_result" in locals()
-                        and "expected_result_eval" in locals()
-                    ):
+                elif status == "assertion_error":
+                    error_msg = result_info.get("error", "")
+                    info = result_info.get("info", {})
+                    if info.get("actual") and info.get("expected"):
                         print(f"❌ Test {i + 1}: FAILED")
-                        print(f"   🎯 Expected: {expected_result_eval}")
-                        print(f"   📤 Actual: {actual_result}")
-                        print(
-                            f"   💥 Assertion failed: {actual_result} != {expected_result_eval}"
-                        )
+                        print(f"   🎯 Expected: {info.get('expected')}")
+                        print(f"   📤 Actual: {info.get('actual')}")
                     else:
-                        print(f"❌ Test {i + 1}: FAILED (AssertionError: {str(e)})")
+                        print(f"❌ Test {i + 1}: FAILED (AssertionError: {error_msg})")
 
-                except Exception as e:
-                    signal.alarm(0)  # Clear timeout
-                    print(f"❌ Test {i + 1}: FAILED (Error: {str(e)})")
+                else:  # error
+                    error_msg = result_info.get("error", "Unknown error")
+                    print(f"❌ Test {i + 1}: FAILED (Error: {error_msg})")
                     print(f"   🧪 Test case: {test_case}")
 
             # Calculate proportional reward for test cases (0 to +1.0)
@@ -285,10 +358,6 @@ def execution_reward_aux(
                 reward += test_reward
                 print(f"📊 Tests passed: {passed_tests}/{total_tests}")
                 print(f"✅ Test reward: +{test_reward:.2f} (total: {reward})")
-
-        except Exception as e:
-            print(f"❌ Code loading failed: {str(e)}")
-            signal.alarm(0)
 
         # ================================================================
         # LEVEL 3 BONUS: AUX FUNCTION USAGE AND ANTI-WRAPPER BONUSES
