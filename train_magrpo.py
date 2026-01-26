@@ -5,6 +5,7 @@ Supports multiple datasets and configurations via YAML files.
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -12,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
  
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, Optional
 
 from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
@@ -25,7 +26,7 @@ from loggers.mt_code_logger import (
     mt_humaneval_logger,
 )
 
-from rewards.code_rewards import execution_reward_aux
+from rewards.code_rewards import execution_reward_aux, execution_reward_bigcodebench
 from comlrl.utils.reward_processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig, MAGRPOTrainer
 import external as external_ctx
@@ -46,6 +47,90 @@ def _set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def load_json_dataset(
+    json_path: str,
+    train_split: str,
+    eval_split: str,
+    verbose: bool = False
+) -> Tuple[Any, Any]:
+    """
+    Load dataset from a JSON or JSONL file.
+    
+    Args:
+        json_path: Path to the JSON/JSONL file
+        train_split: Split specification like "train[:500]" or "0:500"
+        eval_split: Split specification like "train[500:550]" or "500:550"
+        verbose: Whether to print loading information
+        
+    Returns:
+        Tuple of (train_dataset, eval_dataset)
+    """
+    from datasets import Dataset
+    
+    # Load data from JSON/JSONL file
+    data = []
+    with open(json_path, 'r', encoding='utf-8') as f:
+        # Check if it's JSONL (one JSON per line) or regular JSON
+        first_char = f.read(1)
+        f.seek(0)
+        
+        if first_char == '[':
+            # Regular JSON array
+            data = json.load(f)
+        else:
+            # JSONL format
+            for line in f:
+                line = line.strip()
+                if line:
+                    data.append(json.loads(line))
+    
+    if verbose:
+        print(f"Loaded {len(data)} samples from {json_path}")
+    
+    # Parse split specifications
+    def parse_split(split_str: str, total_len: int) -> Tuple[int, int]:
+        """Parse split string like 'train[:500]' or '0:500' into (start, end)."""
+        # Remove 'train' prefix if present
+        split_str = re.sub(r'^(train|test|validation)\s*', '', split_str)
+        # Remove brackets
+        split_str = split_str.strip('[]')
+        
+        if ':' in split_str:
+            parts = split_str.split(':')
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else total_len
+        else:
+            # Single index
+            start = 0
+            end = int(split_str) if split_str else total_len
+        
+        # Handle negative indices
+        if start < 0:
+            start = total_len + start
+        if end < 0:
+            end = total_len + end
+            
+        return max(0, start), min(total_len, end)
+    
+    total_len = len(data)
+    
+    train_start, train_end = parse_split(train_split, total_len)
+    eval_start, eval_end = parse_split(eval_split, total_len)
+    
+    train_data = data[train_start:train_end]
+    eval_data = data[eval_start:eval_end]
+    
+    if verbose:
+        print(f"Train split [{train_start}:{train_end}]: {len(train_data)} samples")
+        print(f"Eval split [{eval_start}:{eval_end}]: {len(eval_data)} samples")
+    
+    # Convert to HuggingFace Dataset
+    train_dataset = Dataset.from_list(train_data)
+    eval_dataset = Dataset.from_list(eval_data)
+    
+    return train_dataset, eval_dataset
 
 
 def aux_function_formatter(example: Dict[str, Any]) -> str:
@@ -70,10 +155,14 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT include test cases or example usage
 - Create a helper function named 'aux' that can assist the main function
 - The function should return useful data for solving the problem
+- Define actual parameters for the aux function (not "...")
 
-Your output should follow this format:
+Example format (replace with actual implementation):
 
-def aux(...):\n # your function code here\nreturn result\n"""
+def aux(param1, param2):
+    # implementation here
+    return result
+"""
 
     return prompt_text
 
@@ -95,7 +184,7 @@ def main_function_formatter(example: Dict[str, Any]) -> str:
 Problem:
 {prompt}
 
-You have access to a helper function: aux(...)
+You have access to a helper function: aux()
 
 IMPORTANT INSTRUCTIONS:
 - Output ONLY the function code, no explanations or examples
@@ -106,34 +195,152 @@ IMPORTANT INSTRUCTIONS:
 - Implement ONLY the '{entry_point}' function as specified
 - You can call aux() to assign value to a variable within your function if helpful
 
-Your output should follow this format:
+Example format (replace with actual implementation):
 
-def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+def {entry_point}({params_str}):
+    # implementation here
+    return result
+"""
 
     return prompt_text
 
 
-def get_formatters(dataset_type: str, num_agents: int):
+# ============================================================================
+# BigCodeBench Formatters
+# ============================================================================
+
+def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
+    """Formatter for the auxiliary function generator (Agent 1) for BigCodeBench tasks."""
+    # BigCodeBench uses instruct_prompt for task description
+    instruct_prompt = example.get("instruct_prompt", "")
+    code_prompt = example.get("code_prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    if not instruct_prompt:
+        return "Error: Could not extract task information from BigCodeBench data."
+
+    prompt_text = f"""Create a helper function for this coding problem.
+
+Problem:
+{instruct_prompt}
+
+Code template:
+{code_prompt}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Create a helper function named 'aux' that can assist the main function '{entry_point}'
+- The function should return useful data for solving the problem
+- Do NOT include import statements (they will be added separately)
+- Define actual parameters for the aux function (not "...")
+
+Example format (replace with actual implementation):
+
+def aux(param1, param2):
+    # implementation here
+    return result
+"""
+
+    return prompt_text
+
+
+def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
+    """Factory function to create a main formatter with configurable aux usage.
+    
+    Args:
+        force_aux_usage: If True, prompt requires aux() usage. If False, aux() is optional.
+    """
+    def bigcodebench_main_formatter(example: Dict[str, Any]) -> str:
+        """Formatter for the main function generator (Agent 2) for BigCodeBench tasks."""
+        instruct_prompt = example.get("instruct_prompt", "")
+        code_prompt = example.get("code_prompt", "")
+        entry_point = example.get("entry_point", "")
+
+        if not instruct_prompt or not entry_point:
+            return "Error: Could not extract task information from BigCodeBench data."
+
+        # Extract function signature from code_prompt
+        func_signature = ""
+        if code_prompt:
+            for line in code_prompt.split("\n"):
+                if line.strip().startswith(f"def {entry_point}"):
+                    func_signature = line.strip()
+                    break
+
+        # Choose aux usage instruction based on config
+        if force_aux_usage:
+            aux_instruction = "- You MUST call aux() in your implementation (required, not optional)"
+        else:
+            aux_instruction = "- You can call aux() to help with the implementation"
+
+        prompt_text = f"""Solve this coding problem by implementing the required function.
+
+Problem:
+{instruct_prompt}
+
+Code template:
+{code_prompt}
+
+You have access to a helper function: aux()
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Do NOT redefine the aux() function
+- Do NOT include import statements (they will be added separately)
+- Implement ONLY the '{entry_point}' function as specified
+{aux_instruction}
+
+Example format (replace with actual implementation):
+
+{func_signature if func_signature else f"def {entry_point}(param1, param2):"}
+    # implementation here
+    return result
+"""
+
+        return prompt_text
+    
+    return bigcodebench_main_formatter
+
+
+# Keep backward-compatible default formatter
+bigcodebench_main_formatter = create_bigcodebench_main_formatter(force_aux_usage=False)
+
+
+def get_formatters(dataset_type: str, num_agents: int, force_aux_usage: bool = False):
     """Get a list of per-agent formatters based on dataset type and agent count.
 
     For code tasks, use aux formatters for all agents except the last, which uses main.
+    
+    Args:
+        dataset_type: Type of dataset (humaneval, bigcodebench, etc.)
+        num_agents: Number of agents
+        force_aux_usage: If True, main agent prompt requires aux() usage (BigCodeBench only)
     """
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"] and num_agents == 2:
         return [aux_function_formatter, main_function_formatter]
+    
+    if dataset_type.lower() in ["bigcodebench", "bcb"] and num_agents == 2:
+        main_formatter = create_bigcodebench_main_formatter(force_aux_usage=force_aux_usage)
+        return [bigcodebench_aux_formatter, main_formatter]
 
-    raise NotImplementedError("Other number of agents have not been implemented yet")
+    raise NotImplementedError(f"Dataset type '{dataset_type}' with {num_agents} agents has not been implemented yet")
 
 
-def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
+def get_logger_and_aggregator(dataset_type: str):
     """
     Get the logger and aggregator functions based on dataset type.
-    Standardized to a single modern interface that accepts agent_completions_turns.
     """
     if dataset_type is None:
         return None, None
 
-    # Use unified multi-turn compatible logger/aggregator for code datasets
-    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
+    # Use unified logger/aggregator for code datasets
+    if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp", "bigcodebench", "bcb"]:
         return mt_humaneval_logger, aggregate_mt_humaneval_metrics_for_logging
 
     return None, None
@@ -147,7 +354,7 @@ def get_reward_function(dataset_type: str, num_agents: int):
     """
     if dataset_type is None:
         raise ValueError(
-            "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
+            "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval/bigcodebench' to the dataset section."
         )
 
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
@@ -182,6 +389,41 @@ def get_reward_function(dataset_type: str, num_agents: int):
             )
 
         return reward_wrapper
+
+    if dataset_type.lower() in ["bigcodebench", "bcb"]:
+
+        def bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=None):
+            """Reward wrapper for BigCodeBench dataset."""
+            if not agent_completions or len(agent_completions) < 1:
+                return []
+
+            # Choose aux from first agent, main from last agent
+            if len(agent_completions) >= 2:
+                completion1 = agent_completions[0]
+                completion2 = agent_completions[-1]
+            else:
+                completion1 = [""] * len(agent_completions[0])
+                completion2 = agent_completions[0]
+
+            test_cases = []
+            entry_points = []
+            code_prompts = []
+
+            if batch_items is not None:
+                for item in batch_items:
+                    # BigCodeBench uses 'test' for unittest code
+                    test_cases.append(item.get("test", ""))
+                    entry_points.append(item.get("entry_point", ""))
+                    # BigCodeBench has code_prompt with imports and function signature
+                    code_prompts.append(item.get("code_prompt", ""))
+            else:
+                raise ValueError("batch_items must be provided for BigCodeBench reward calculation")
+
+            return execution_reward_bigcodebench(
+                completion1, completion2, test_cases, entry_points, code_prompts
+            )
+
+        return bigcodebench_reward_wrapper
 
     raise ValueError(f"Unknown dataset type: {dataset_type}")
 
@@ -229,6 +471,8 @@ def main():
             dataset_type = "coophumaneval"
         elif "mbpp" in dataset_name.lower():
             dataset_type = "mbpp"
+        elif "bigcodebench" in dataset_name.lower() or "bcb" in dataset_name.lower():
+            dataset_type = "bigcodebench"
         else:
             raise ValueError(
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
@@ -245,22 +489,13 @@ def main():
         config.get_section("magrpo") if hasattr(config, "get_section") else {}
     )
     seed_value = int(config.get("seed", magrpo_config.get("seed", 42)))
-    num_turns = magrpo_config.get("num_turns", 2)
     num_agents = magrpo_config.get("num_agents", 2)
-    is_multi_turn = num_turns > 1
     output_verbose = config.get("output.verbose", False)
     if output_verbose:
-        print(f"Multi-turn training enabled: num_turns={num_turns}") if is_multi_turn else print(
-            f"Single-turn training: num_turns={num_turns}"
-        )
+        print(f"Single-turn MAGRPO training with {num_agents} agents")
 
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
-
-    # Use different output directory prefix for multi-turn
-    if is_multi_turn:
-        output_dir = os.path.join(output_base_dir, f"mt_job_{slurm_job_id}")
-    else:
-        output_dir = os.path.join(output_base_dir, f"job_{slurm_job_id}")
+    output_dir = os.path.join(output_base_dir, f"job_{slurm_job_id}")
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -272,13 +507,23 @@ def main():
 
     train_dataset = None
     eval_dataset = None
-    try:
-        train_dataset = load_dataset(dataset_name, split=train_split)
-        eval_dataset = load_dataset(dataset_name, split=eval_split)
-
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return
+    
+    # Check if dataset_name is a local JSON/JSONL file
+    if dataset_name.endswith('.json') or dataset_name.endswith('.jsonl'):
+        try:
+            train_dataset, eval_dataset = load_json_dataset(
+                dataset_name, train_split, eval_split, output_verbose
+            )
+        except Exception as e:
+            print(f"Error loading JSON dataset: {e}")
+            return
+    else:
+        try:
+            train_dataset = load_dataset(dataset_name, split=train_split, trust_remote_code=True)
+            eval_dataset = load_dataset(dataset_name, split=eval_split, trust_remote_code=True)
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            return
 
     if output_verbose:
         print(f"\nUsing model: {model_name}")
@@ -313,6 +558,10 @@ def main():
     # Config: External transitions (mode, sandbox, expert model, context flags)
     # ------------------------------------------------------------------
     external_cfg = config.get_section("external") if hasattr(config, "get_section") else {}
+    
+    # Multi-turn mode: currently only single-turn is supported
+    is_multi_turn = False
+    external_mode = external_cfg.get("mode", "level_feedback")
 
     # Register external context resolver using dataset items
     def _normalize_prompt(p: str) -> str:
@@ -412,9 +661,18 @@ def main():
     # ------------------------------------------------------------------
     # Build training args
     # ------------------------------------------------------------------
+    # LoRA settings can be at root level or in magrpo section
+    # Check root level first, then fallback to magrpo section
+    use_lora = config.get("use_lora", magrpo_config.get("use_lora", False))
+    lora_r = config.get("lora_r", magrpo_config.get("lora_r", 16))
+    lora_alpha = config.get("lora_alpha", magrpo_config.get("lora_alpha", 32))
+    lora_dropout = config.get("lora_dropout", magrpo_config.get("lora_dropout", 0.05))
+    lora_target_modules = config.get("lora_target_modules", magrpo_config.get("lora_target_modules", None))
+    lora_path = config.get("lora_path", magrpo_config.get("lora_path", None))
+
     magrpo_args_kwargs = {
         "output_dir": output_dir,
-        "num_agents": num_agents,  # Pass num_agents to the config
+        "num_agents": num_agents,
         "num_train_epochs": magrpo_config.get("num_train_epochs", 20),
         "per_device_train_batch_size": magrpo_config.get(
             "per_device_train_batch_size", 1
@@ -428,26 +686,35 @@ def main():
         "max_new_tokens": magrpo_config.get("max_new_tokens", 256),
         "temperature": temperature,
         "top_p": top_p,
-        # Multi-turn parameters (automatically handled based on num_turns)
-        "num_turns": num_turns,
-        "discount": magrpo_config.get("discount", 0.9),
         "joint_mode": magrpo_config.get("joint_mode", "aligned"),
-        "termination_threshold": magrpo_config.get("termination_threshold", -0.2),
         "rollout_buffer_size": magrpo_config.get("rollout_buffer_size", 2),
-        "external_prompt_passthrough": True,
+        # Parallel reward computation
+        "parallel_reward": magrpo_config.get("parallel_reward", True),
+        "max_reward_workers": magrpo_config.get("max_reward_workers", 8),
+        "reward_parallel_backend": magrpo_config.get("reward_parallel_backend", "process"),
+        # LoRA configuration (from root or magrpo section)
+        "use_lora": use_lora,
+        "lora_r": lora_r,
+        "lora_alpha": lora_alpha,
+        "lora_dropout": lora_dropout,
+        # Multi-GPU
+        "use_distributed": magrpo_config.get("use_distributed", False),
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
+    if lora_target_modules is not None:
+        magrpo_args_kwargs["lora_target_modules"] = lora_target_modules
+    if lora_path is not None:
+        magrpo_args_kwargs["lora_path"] = lora_path
     magrpo_args = MAGRPOConfig(**magrpo_args_kwargs)
 
     # ------------------------------------------------------------------
     # Formatters, rewards, and logging
     # ------------------------------------------------------------------
-    formatters = get_formatters(dataset_type, num_agents)
+    force_aux_usage = magrpo_config.get("force_aux_usage", False)
+    formatters = get_formatters(dataset_type, num_agents, force_aux_usage=force_aux_usage)
     reward_func = get_reward_function(dataset_type, num_agents)
-    eval_logger, eval_aggregator = get_logger_and_aggregator(
-        dataset_type, is_multi_turn
-    )
+    eval_logger, eval_aggregator = get_logger_and_aggregator(dataset_type)
 
     # ------------------------------------------------------------------
     # W&B configuration and tags
@@ -455,25 +722,11 @@ def main():
     wandb_section = (
         config.get_section("wandb") if hasattr(config, "get_section") else {}
     )
-    # Model short name no longer used in W&B naming
+    wandb_name = wandb_section.get("name", f"magrpo_{dataset_type}")
 
-    # Use different wandb name for multi-turn
-    if is_multi_turn:
-        wandb_name = wandb_section.get("name", f"mt_magrpo_{dataset_type}")
-    else:
-        wandb_name = wandb_section.get("name", f"magrpo_{dataset_type}")
-
-    # external_cfg already loaded above
-    # Compute tags and add self-evolved when using analysis-based external modes
-    external_mode = external_cfg.get("mode", "level_feedback")
-    default_tags = ["magrpo", dataset_type or "code", f"turns_{num_turns}"]
+    default_tags = ["magrpo", dataset_type or "code", f"agents_{num_agents}"]
     tags_from_cfg = wandb_section.get("tags", default_tags)
-    # Ensure list
     tags = list(tags_from_cfg) if isinstance(tags_from_cfg, list) else default_tags
-    # Add a marker tag for analysis-based external modes
-    if external_mode == "level_feedback":
-        if "self-evolved" not in tags:
-            tags.append("self-evolved")
 
     # Collect full config sections for W&B searchability
     dataset_section = config.get_section("dataset") if hasattr(config, "get_section") else {}

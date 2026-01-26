@@ -4,26 +4,38 @@ import numpy as np
 
 
 def mt_humaneval_logger(
-    agent_completions_turns: List[List[List[str]]],
-    test_cases: List[str],
-    entry_points: List[str],
+    agent_completions_turns: Optional[List[List[List[str]]]] = None,
+    test_cases: List[str] = None,
+    entry_points: List[str] = None,
     prompts: Optional[List[str]] = None,
+    # Support for single-turn mode (from magrpo.py)
+    agent_completions: Optional[List[List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Multi-turn logger for code generation tasks (HumanEval/CoopHumanEval) with aux + main function collaboration.
+    Logger for code generation tasks with aux + main function collaboration.
+    Supports both multi-turn and single-turn modes.
 
     Args:
-        agent_completions_turns: List per agent -> per sample -> per turn completions
+        agent_completions_turns: Multi-turn mode - List per agent -> per sample -> per turn completions
         test_cases: List of test cases
         entry_points: List of entry point function names
         prompts: Optional list of prompts for import extraction
+        agent_completions: Single-turn mode - List per agent -> per sample completions
 
     Returns:
-        List of metric dictionaries with multi-turn information
+        List of metric dictionaries
     """
     from loggers.code_logger import code_reward_logger
 
     all_metrics = []
+
+    # Handle single-turn mode (agent_completions from magrpo.py)
+    if agent_completions is not None and agent_completions_turns is None:
+        # Convert single-turn format to multi-turn format: [num_agents][num_samples] -> [num_agents][num_samples][1]
+        agent_completions_turns = [
+            [[comp] for comp in agent_comps]
+            for agent_comps in agent_completions
+        ]
 
     # Derive completions for aux/main from agent_completions_turns
     # agent_completions_turns shape: [num_agents][num_samples][num_turns]

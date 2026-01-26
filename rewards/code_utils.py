@@ -1,16 +1,457 @@
 import ast
+import contextlib
+import faulthandler
+import io
+import multiprocessing
+import os
+import platform
 import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import types
+import unittest
+from multiprocessing import Value, Manager
+from typing import Tuple, Dict, Any
 
 
 class TimeoutException(Exception):
     """Exception raised when code execution times out."""
-
     pass
 
 
 def timeout_handler(signum, frame):
     """Signal handler for timeouts."""
     raise TimeoutException("Code execution timed out")
+
+
+# =============================================================================
+# BigCodeBench Sandboxing Utilities (adapted from official BigCodeBench code)
+# =============================================================================
+
+TIMEOUT_LIMIT = 10.0  # Shorter timeout for training (vs 240 in official)
+
+# Status codes
+_SUCCESS = 0
+_FAILED = 1
+_TIMEOUT = 2
+_UNKNOWN = 3
+
+PASS = "pass"
+FAIL = "fail"
+TIMEOUT = "timeout"
+
+_mapping = {_SUCCESS: PASS, _FAILED: FAIL, _TIMEOUT: TIMEOUT, _UNKNOWN: None}
+
+
+@contextlib.contextmanager
+def swallow_subprocess_output():
+    """Context manager to swallow stdout and stderr for subprocesses."""
+    original_popen = subprocess.Popen
+    original_run = subprocess.run
+
+    def _popen_patch(*args, **kwargs):
+        if 'capture_output' in kwargs and kwargs['capture_output']:
+            kwargs.pop('stdout', None)
+            kwargs.pop('stderr', None)
+        else:
+            kwargs.setdefault('stdout', subprocess.PIPE)
+            kwargs.setdefault('stderr', subprocess.PIPE)
+        return original_popen(*args, **kwargs)
+
+    def _run_patch(*args, **kwargs):
+        if 'capture_output' in kwargs and kwargs['capture_output']:
+            kwargs.pop('stdout', None)
+            kwargs.pop('stderr', None)
+        else:
+            kwargs.setdefault('stdout', subprocess.PIPE)
+            kwargs.setdefault('stderr', subprocess.PIPE)
+        return original_run(*args, **kwargs)
+
+    subprocess.Popen = _popen_patch
+    subprocess.run = _run_patch
+    try:
+        yield
+    finally:
+        subprocess.Popen = original_popen
+        subprocess.run = original_run
+
+
+class WriteOnlyStringIO(io.StringIO):
+    """StringIO that throws an exception when it's read from."""
+
+    def read(self, *args, **kwargs):
+        raise IOError
+
+    def readline(self, *args, **kwargs):
+        raise IOError
+
+    def readlines(self, *args, **kwargs):
+        raise IOError
+
+    def readable(self, *args, **kwargs):
+        return False
+
+
+class redirect_stdin(contextlib._RedirectStream):
+    _stream = "stdin"
+
+
+@contextlib.contextmanager
+def swallow_io():
+    """Capture and suppress all I/O."""
+    stream = WriteOnlyStringIO()
+    with contextlib.redirect_stdout(stream):
+        with contextlib.redirect_stderr(stream):
+            with redirect_stdin(stream):
+                with swallow_subprocess_output():
+                    yield
+
+
+@contextlib.contextmanager
+def time_limit(seconds: float):
+    """Context manager for setting a time limit."""
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    signal.signal(signal.SIGALRM, signal_handler)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
+
+@contextlib.contextmanager
+def chdir(root):
+    """Context manager to change directory temporarily."""
+    if root == ".":
+        yield
+        return
+    cwd = os.getcwd()
+    os.chdir(root)
+    try:
+        yield
+    except BaseException as exc:
+        raise exc
+    finally:
+        os.chdir(cwd)
+
+
+@contextlib.contextmanager
+def create_tempdir():
+    """Create and use a temporary directory."""
+    with tempfile.TemporaryDirectory() as dirname:
+        with chdir(dirname):
+            yield dirname
+
+
+@contextlib.contextmanager
+def safe_environment():
+    """Create a safe execution environment by intercepting dangerous system calls."""
+    # Save original functions
+    original_kill = os.kill
+    original_killpg = os.killpg
+    original_system = os.system
+    original_subprocess_call = subprocess.call
+    original_subprocess_check_output = subprocess.check_output
+    original_subprocess_run = subprocess.run
+    original_subprocess_popen = subprocess.Popen
+    original_os_popen = os.popen
+    original_os_execv = os.execv
+    original_os_execvp = os.execvp
+    original_os_execvpe = os.execvpe
+
+    current_pid = os.getpid()
+    current_pgid = os.getpgid(current_pid)
+    manager = multiprocessing.Manager()
+    child_pids = manager.list()
+
+    def safe_kill(pid, sig):
+        try:
+            if pid == current_pid or pid in child_pids:
+                original_kill(pid, sig)
+        except ProcessLookupError:
+            pass
+
+    def safe_killpg(pgid, sig):
+        if pgid == current_pgid or pgid in {os.getpgid(pid) for pid in child_pids}:
+            original_killpg(pgid, sig)
+
+    def safe_system(command):
+        if 'kill' in command or 'killall' in command:
+            return 0
+        return original_system(command)
+
+    def safe_subprocess_call(command, *args, **kwargs):
+        if 'kill' in str(command) or 'killall' in str(command):
+            return 0
+        return original_subprocess_call(command, *args, **kwargs)
+
+    def safe_subprocess_check_output(command, *args, **kwargs):
+        if 'ps' in str(command):
+            return b""
+        return original_subprocess_check_output(command, *args, **kwargs)
+
+    def safe_subprocess_run(*args, **kwargs):
+        if args and ('kill' in str(args[0]) or 'killall' in str(args[0])):
+            return subprocess.CompletedProcess(args, 0, b'', b'')
+        return original_subprocess_run(*args, **kwargs)
+
+    class SafePopen(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            kwargs['preexec_fn'] = os.setsid
+            super().__init__(*args, **kwargs)
+            child_pids.append(self.pid)
+
+        def communicate(self, *args, **kwargs):
+            try:
+                return super().communicate(*args, **kwargs)
+            except subprocess.TimeoutExpired:
+                return None, None
+
+        def kill(self):
+            safe_kill(self.pid, signal.SIGTERM)
+
+        def terminate(self):
+            safe_kill(self.pid, signal.SIGTERM)
+
+    def safe_os_popen(command):
+        if 'kill' in command or 'killall' in command:
+            return os.popen('echo Intercepted')
+        return original_os_popen(command)
+
+    def safe_exec(*args, **kwargs):
+        pass  # Block exec calls
+
+    # Override risky functions
+    os.kill = safe_kill
+    os.killpg = safe_killpg
+    os.system = safe_system
+    subprocess.call = safe_subprocess_call
+    subprocess.check_output = safe_subprocess_check_output
+    subprocess.run = safe_subprocess_run
+    subprocess.Popen = SafePopen
+    os.popen = safe_os_popen
+    os.execv = safe_exec
+    os.execvp = safe_exec
+    os.execvpe = safe_exec
+
+    try:
+        yield
+    finally:
+        # Cleanup child processes
+        for pid in child_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                for _ in range(10):
+                    time.sleep(0.1)
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                else:
+                    os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, Exception):
+                pass
+
+        # Restore original functions
+        os.kill = original_kill
+        os.killpg = original_killpg
+        os.system = original_system
+        subprocess.call = original_subprocess_call
+        subprocess.check_output = original_subprocess_check_output
+        subprocess.run = original_subprocess_run
+        subprocess.Popen = original_subprocess_popen
+        os.popen = original_os_popen
+        os.execv = original_os_execv
+        os.execvp = original_os_execvp
+        os.execvpe = original_os_execvpe
+
+
+def reliability_guard(max_as_limit=30*1024, max_data_limit=30*1024, max_stack_limit=10):
+    """
+    Set resource limits to prevent destructive operations.
+    WARNING: This is NOT a security sandbox.
+    """
+    os.environ['TZ'] = 'UTC'
+    try:
+        time.tzset()
+    except Exception:
+        pass
+    
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3"
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
+
+    if max_as_limit and max_data_limit and max_stack_limit:
+        try:
+            import resource
+            
+            max_as_limit_bytes = max_as_limit * 1024 * 1024
+            max_data_limit_bytes = max_data_limit * 1024 * 1024
+            max_stack_limit_bytes = max_stack_limit * 1024 * 1024
+
+            resource.setrlimit(resource.RLIMIT_AS, (max_as_limit_bytes, max_as_limit_bytes))
+            resource.setrlimit(resource.RLIMIT_DATA, (max_data_limit_bytes, max_data_limit_bytes))
+            if platform.uname().system != "Darwin":
+                resource.setrlimit(resource.RLIMIT_STACK, (max_stack_limit_bytes, max_stack_limit_bytes))
+        except Exception:
+            pass  # Resource limits may not be available on all systems
+
+    faulthandler.disable()
+
+    import builtins
+    builtins.exit = None
+    builtins.quit = None
+
+    # Close matplotlib figures if available
+    try:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+    except ImportError:
+        pass
+
+
+def unsafe_execute_bigcodebench(
+    entry_point: str,
+    code: str,
+    test_code: str,
+    timeout: float,
+    max_as_limit: float,
+    max_data_limit: float,
+    max_stack_limit: float,
+    stat,  # Value
+    details,  # Manager dict
+):
+    """
+    Execute code in a sandboxed environment.
+    This function runs in a separate process.
+    """
+    with safe_environment(), create_tempdir():
+        import os
+        import shutil
+        import builtins
+
+        rmtree = shutil.rmtree
+        rmdir = os.rmdir
+        chdir_func = os.chdir
+
+        reliability_guard(max_as_limit, max_data_limit, max_stack_limit)
+
+        module_name = "__test__"
+        new_module = types.ModuleType(module_name)
+        new_module.__dict__.update({
+            '__builtins__': builtins,
+            '__file__': f"{module_name}.py",
+            '__package__': None,
+            '__doc__': None,
+            'sys': sys,
+            'os': os,
+            'environ': os.environ,
+        })
+
+        try:
+            full_code = code + "\n" + test_code
+
+            with swallow_io():
+                exec(compile(full_code, f"{module_name}.py", 'exec'), new_module.__dict__)
+                sys.modules[module_name] = new_module
+                TestCases = getattr(new_module, 'TestCases')
+                loader = unittest.TestLoader()
+                suite = loader.loadTestsFromTestCase(TestCases)
+                test_result = unittest.TestResult()
+                with time_limit(timeout):
+                    suite.run(test_result)
+
+            issues = test_result.failures + test_result.errors
+            for test, trace in issues:
+                test_name = test.id().split(".")[-1]
+                details[test_name] = trace[:2000]  # Limit trace length (increased for debugging)
+            
+            details["_total"] = test_result.testsRun
+            details["_passed"] = test_result.testsRun - len(test_result.failures) - len(test_result.errors)
+            stat.value = _SUCCESS
+
+        except TimeoutException:
+            details["ALL"] = "Timeout"
+            stat.value = _TIMEOUT
+        except ImportError as e:
+            details["ALL"] = f"ImportError: {str(e)[:1000]}"
+            stat.value = _FAILED
+        except BaseException as e:
+            details["ALL"] = str(e)[:2000]
+            stat.value = _FAILED
+
+        # Restore for cleanup
+        shutil.rmtree = rmtree
+        os.rmdir = rmdir
+        os.chdir = chdir_func
+
+
+def untrusted_check_bigcodebench(
+    code: str,
+    test_code: str,
+    entry_point: str,
+    timeout: float = 5.0,
+    max_as_limit: float = 30*1024,
+    max_data_limit: float = 30*1024,
+    max_stack_limit: float = 10,
+) -> Tuple[str, Dict[str, Any], int, int]:
+    """
+    Run BigCodeBench tests in an isolated process with sandboxing.
+    
+    Returns:
+        Tuple of (status, details_dict, passed_tests, total_tests)
+    """
+    timeout = max(timeout, 1.0)
+    
+    # Shared memory objects
+    stat = Value("i", _UNKNOWN)
+    manager = Manager()
+    details = manager.dict()
+
+    p = multiprocessing.Process(
+        target=unsafe_execute_bigcodebench,
+        args=(
+            entry_point,
+            code,
+            test_code,
+            timeout,
+            max_as_limit,
+            max_data_limit,
+            max_stack_limit,
+            stat,
+            details,
+        ),
+    )
+    p.start()
+    p.join(timeout=timeout + 1)
+    
+    if p.is_alive():
+        p.terminate()
+        time.sleep(0.1)
+    if p.is_alive():
+        p.kill()
+        time.sleep(0.1)
+
+    status = _mapping[stat.value]
+    details_dict = dict(details)
+
+    if not status:
+        status = TIMEOUT
+
+    if status == PASS and details_dict:
+        # Check if there were any failures in details
+        if any(k not in ("_total", "_passed") for k in details_dict if not k.startswith("_")):
+            status = FAIL
+
+    passed = details_dict.get("_passed", 0)
+    total = details_dict.get("_total", 1)
+
+    return status, details_dict, passed, total
 
 
 def extract_imports_from_prompt(prompt):
@@ -53,9 +494,50 @@ def cleanup_code(code):
     if not code or not isinstance(code, str):
         return ""
 
+    # Step 0: Detect and remove template/placeholder patterns
+    # These are patterns that indicate the model just copied the prompt template
+    template_patterns = [
+        r'def\s+\w+\s*\(\s*\.\.\.\s*\)\s*:',  # def func(...):
+        r'#\s*your\s+(function\s+)?code\s+here',  # # your code here
+        r'#\s*implementation\s+here',  # # implementation here
+    ]
+    
+    # Check if the code is mostly a template (placeholder with no real implementation)
+    code_stripped = code.strip()
+    lines = code_stripped.split('\n')
+    non_empty_lines = [l.strip() for l in lines if l.strip()]
+    
+    # If code has def func(...): pattern, it's a template
+    if re.search(r'def\s+\w+\s*\(\s*\.\.\.\s*\)\s*:', code_stripped):
+        # Check if there's any real implementation beyond template
+        has_real_code = False
+        for line in non_empty_lines:
+            line_clean = line.strip()
+            # Skip template lines
+            if re.match(r'def\s+\w+\s*\(\s*\.\.\.\s*\)\s*:', line_clean):
+                continue
+            if re.search(r'#\s*(your|implementation|function)\s+(code|here)', line_clean, re.IGNORECASE):
+                continue
+            if line_clean == 'return result':
+                continue
+            if line_clean.startswith('#'):
+                continue
+            # If we find any other code, it might be real
+            if line_clean and not line_clean.startswith('def '):
+                has_real_code = True
+                break
+        
+        if not has_real_code:
+            # This is just a template, return empty
+            return ""
+
     # Step 1: Remove markdown code blocks but keep the content
     code = re.sub(r"```python\s*\n?", "", code)
     code = re.sub(r"```\s*\n?", "", code)
+    
+    # Step 1.5: Remove template placeholder comments
+    code = re.sub(r'#\s*your\s+(function\s+)?code\s+here\s*\n?', '', code, flags=re.IGNORECASE)
+    code = re.sub(r'#\s*implementation\s+here\s*\n?', '', code, flags=re.IGNORECASE)
 
     # Step 2: Split into lines for processing
     lines = code.split("\n")
@@ -320,6 +802,107 @@ def extract_test_cases(test_code, entry_point):
         test_cases.append(test_case)
 
     return test_cases
+
+
+def extract_bigcodebench_tests(test_code, entry_point):
+    """
+    Extract test methods from BigCodeBench unittest-based test code.
+    
+    BigCodeBench uses unittest.TestCase classes with test methods.
+    Returns the full test code as a runnable string.
+    """
+    if not test_code or not entry_point:
+        return None, []
+    
+    # BigCodeBench test structure is unittest-based
+    # We need to extract the TestCases class and run it
+    return test_code, [entry_point]
+
+
+def run_bigcodebench_tests(combined_code, test_code, entry_point, timeout=5):
+    """
+    Run BigCodeBench unittest-based tests on the combined code.
+    Uses multiprocessing-based sandboxing for isolation.
+    
+    Args:
+        combined_code: The aux + main function code
+        test_code: The unittest test code from BigCodeBench
+        entry_point: The function name being tested
+        timeout: Timeout in seconds (default 5s for training speed)
+        
+    Returns:
+        tuple: (passed_tests, total_tests, error_message)
+    """
+    # Use the sandboxed execution
+    status, details, passed, total = untrusted_check_bigcodebench(
+        code=combined_code,
+        test_code=test_code,
+        entry_point=entry_point,
+        timeout=timeout,
+    )
+    
+    # Build error message from details
+    error_msg = None
+    if status != PASS:
+        error_parts = []
+        for key, value in details.items():
+            if not key.startswith("_"):  # Skip internal keys
+                error_parts.append(f"{key}: {value[:500]}")
+        error_msg = "\n".join(error_parts[:5]) if error_parts else status
+    
+    return passed, total, error_msg
+
+
+def extract_imports_from_code_prompt(code_prompt):
+    """
+    Extract import statements AND constant definitions from BigCodeBench code_prompt.
+    The code_prompt contains imports, constants, and function signature.
+    
+    This extracts everything before the main function definition, including:
+    - import statements
+    - from ... import statements
+    - constant definitions (e.g., TARGET_JSON_FILE = 'downloaded.json')
+    """
+    if not code_prompt:
+        return ""
+    
+    preamble_lines = []
+    lines = code_prompt.split("\n")
+    
+    for line in lines:
+        stripped = line.strip()
+        # Stop at the main function definition
+        if stripped.startswith("def "):
+            break
+        # Include import statements
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            preamble_lines.append(line)
+        # Include constant definitions (UPPER_CASE = value pattern)
+        elif re.match(r'^[A-Z_][A-Z0-9_]*\s*=', stripped):
+            preamble_lines.append(line)
+        # Include other assignments that might be needed (e.g., lowercase constants)
+        elif '=' in stripped and not stripped.startswith('#') and not stripped.startswith('def '):
+            # Only include simple assignments at module level (not indented)
+            if not line.startswith(' ') and not line.startswith('\t'):
+                preamble_lines.append(line)
+    
+    return "\n".join(preamble_lines)
+
+
+def extract_function_signature_from_code_prompt(code_prompt, entry_point):
+    """
+    Extract the function signature from BigCodeBench code_prompt.
+    """
+    if not code_prompt or not entry_point:
+        return None
+    
+    # Find the function definition line
+    pattern = rf"def\s+{re.escape(entry_point)}\s*\([^)]*\)\s*:"
+    match = re.search(pattern, code_prompt)
+    
+    if match:
+        return match.group(0)
+    return None
 
 
 def check_aux_function_usage(main_code, aux_function_name="aux"):

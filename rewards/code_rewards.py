@@ -28,9 +28,11 @@ from rewards.code_utils import (
     cleanup_code,
     concatenate_functions,
     extract_imports_from_prompt,
+    extract_imports_from_code_prompt,
     extract_specific_function,
     extract_test_cases,
     is_wrapper_function,
+    run_bigcodebench_tests,
     timeout_handler,
 )
 
@@ -471,6 +473,219 @@ def execution_reward_aux(
         except Exception:
             pass  # Silently ignore if logger not available
         
+        rewards.append(reward)
+
+    return rewards
+
+
+def execution_reward_bigcodebench(
+    completion1: List[str],
+    completion2: List[str],
+    test_cases: List[str],
+    entry_points: List[str],
+    code_prompts: List[str] = None,
+) -> List[float]:
+    """
+    Reward function for aux + main function collaboration on BigCodeBench tasks.
+    
+    BigCodeBench uses unittest-based tests instead of simple assert statements.
+
+    LEVEL 1:
+    - +0.4 reward if aux function is properly defined with return statement in completion1
+    - +0.6 reward if main function (entry_point) is properly defined with return statement in completion2
+
+    LEVEL 2:
+    - +0.5 reward if concatenated code has no syntax errors
+
+    LEVEL 3:
+    - +0 to +1.0 reward proportional to correct tests passed
+    - +0.5 bonus if at least one test passes AND main function uses aux function
+    - +1.0 bonus if main function is NOT just a wrapper around aux function
+    - -0.5 deduction if aux function is called but return value is ignored
+
+    Maximum reward: 4.0
+    """
+    # Local print override based on VERBOSE
+    if not VERBOSE:
+        def print(*args, **kwargs):
+            return None
+    else:
+        print = builtins.print
+
+    rewards = []
+    TEST_TIMEOUT = 5  # Shorter timeout for training speed (sandboxed execution)
+
+    # Handle case where code_prompts is not provided
+    if code_prompts is None:
+        code_prompts = [""] * len(completion1)
+
+    for c1, c2, test_code, entry_point, code_prompt in zip(
+        completion1, completion2, test_cases, entry_points, code_prompts
+    ):
+        reward = 0.0
+
+        print("\n" + "=" * 60)
+        print("TESTING BIGCODEBENCH AUX + MAIN FUNCTION COLLABORATION")
+        print("=" * 60)
+        print(f"Entry point: {entry_point}")
+        print(f"Maximum possible reward: 4.0")
+
+        # Extract imports from code_prompt (BigCodeBench provides imports in code_prompt)
+        imports = extract_imports_from_code_prompt(code_prompt)
+        if imports:
+            print(f"\n--- EXTRACTED IMPORTS ---")
+            print(imports)
+
+        # Print raw completions for debugging
+        print(f"\n--- RAW COMPLETION 1 (AUX) ---")
+        print(repr(c1[:500]) if len(c1) > 500 else repr(c1))
+        print(f"\n--- RAW COMPLETION 2 (MAIN) ---")
+        print(repr(c2[:500]) if len(c2) > 500 else repr(c2))
+
+        # Clean completions
+        c1_clean = cleanup_code(c1)
+        c2_clean = cleanup_code(c2)
+
+        # Extract specific functions for validation
+        aux_func = extract_specific_function(c1, "aux")
+        main_func = extract_specific_function(c2, entry_point)
+
+        print(f"\n--- EXTRACTED AUX FUNCTION ---")
+        print(repr(aux_func[:300]) if aux_func and len(aux_func) > 300 else repr(aux_func))
+        print(f"\n--- EXTRACTED MAIN FUNCTION ---")
+        print(repr(main_func[:300]) if main_func and len(main_func) > 300 else repr(main_func))
+
+        # ================================================================
+        # LEVEL 1: FUNCTION DEFINITION REQUIREMENTS
+        # ================================================================
+        print("\n📋 LEVEL 1: FUNCTION DEFINITION REQUIREMENTS")
+        print("-" * 50)
+
+        level1_passed = True
+
+        # 1.1 Check aux function in completion1 (+0.4)
+        aux_check_passed, aux_message = check_function_definition(
+            c1, "aux", "Aux function"
+        )
+
+        if aux_check_passed:
+            reward += 0.4
+            print(f"✅ {aux_message}: +0.4 (total: {reward})")
+        else:
+            print(f"⚠️  {aux_message} (continuing without aux reward)")
+
+        # 1.2 Check main function in completion2 (+0.6)
+        main_check_passed, main_message = check_function_definition(
+            c2, entry_point, f"Main function ({entry_point})"
+        )
+
+        if main_check_passed:
+            reward += 0.6
+            print(f"✅ {main_message}: +0.6 (total: {reward})")
+        else:
+            print(f"❌ {main_message}")
+            level1_passed = False
+
+        print(f"📊 Level 1: {'PASSED' if level1_passed else 'FAILED'}")
+
+        if not level1_passed:
+            print("⏹️  STOPPING: Function definition requirements not met")
+            print(f"Final reward: {reward}")
+            rewards.append(reward)
+            continue
+
+        # ================================================================
+        # LEVEL 2: SYNTAX REQUIREMENTS
+        # ================================================================
+        print("\n⚙️  LEVEL 2: SYNTAX REQUIREMENTS")
+        print("-" * 40)
+
+        # 2.1 Concatenate functions with imports
+        combined_code = concatenate_functions(aux_func, main_func, imports)
+
+        print("\n--- Combined Code (truncated) ---")
+        print(combined_code[:800] if len(combined_code) > 800 else combined_code)
+        print("--- End Code ---")
+
+        # 2.2 Check combined syntax (+0.5)
+        syntax_passed, syntax_message = check_syntax(combined_code, "Combined code")
+
+        if syntax_passed:
+            reward += 0.5
+            print(f"✅ {syntax_message}: +0.5 (total: {reward})")
+        else:
+            print(f"❌ {syntax_message}")
+            print("⏹️  STOPPING: Syntax requirements not met")
+            print(f"Final reward: {reward}")
+            rewards.append(reward)
+            continue
+
+        # ================================================================
+        # LEVEL 3: TEST EXECUTION REQUIREMENTS (BigCodeBench unittest)
+        # ================================================================
+        print("\n🧪 LEVEL 3: TEST EXECUTION REQUIREMENTS (BigCodeBench)")
+        print("-" * 40)
+
+        # Run BigCodeBench unittest-based tests
+        passed_tests, total_tests, error_msg = run_bigcodebench_tests(
+            combined_code, test_code, entry_point, timeout=TEST_TIMEOUT
+        )
+
+        print(f"📝 Test results: {passed_tests}/{total_tests}")
+        if error_msg:
+            print(f"⚠️  Error: {error_msg[:1000]}")
+
+        # Calculate proportional reward for test cases (0 to +1.0)
+        if total_tests > 0:
+            test_reward = (passed_tests / total_tests) * 1.0
+            reward += test_reward
+            print(f"✅ Test reward: +{test_reward:.2f} (total: {reward})")
+
+        # ================================================================
+        # LEVEL 3 BONUS: AUX FUNCTION USAGE AND ANTI-WRAPPER BONUSES
+        # ================================================================
+        print("\n🎁 LEVEL 3 BONUS: COLLABORATION AND COMPLEXITY CHECKS")
+        print("-" * 55)
+
+        if passed_tests > 0 and aux_func:
+            main_uses_aux = check_aux_function_usage(main_func, "aux")
+
+            if main_uses_aux:
+                bonus_reward = 0.5
+                reward += bonus_reward
+                print(f"✅ Main function uses aux function: +{bonus_reward} (total: {reward})")
+
+                # Additional bonus for non-wrapper behavior
+                is_wrapper = is_wrapper_function(main_func, "aux")
+
+                if not is_wrapper:
+                    anti_wrapper_bonus = 1.0
+                    reward += anti_wrapper_bonus
+                    print(f"✅ Main function is NOT a simple wrapper: +{anti_wrapper_bonus} (total: {reward})")
+                    print(f"🎉 FULL COLLABORATION BONUS ACHIEVED!")
+                else:
+                    print("⚠️  Main function appears to be a simple wrapper (no anti-wrapper bonus)")
+
+                # Check for aux calls without assignment (deduction)
+                has_ignored_calls, ignored_calls = check_aux_call_without_assignment(
+                    main_func, "aux"
+                )
+
+                if has_ignored_calls:
+                    deduction = 0.5
+                    reward -= deduction
+                    print(f"⚠️  Aux function called but return value ignored: -{deduction} (total: {reward})")
+                else:
+                    print("✅ All aux function calls properly use return values")
+            else:
+                print("⚠️  Main function does not use aux function (no bonuses)")
+        else:
+            if passed_tests == 0:
+                print("⚠️  No tests passed - no bonus eligibility")
+            if not aux_func:
+                print("⚠️  No aux function defined - no bonus eligibility")
+
+        print(f"\n🏆 FINAL REWARD: {reward} / 4.0")
         rewards.append(reward)
 
     return rewards

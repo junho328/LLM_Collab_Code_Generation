@@ -1,0 +1,13 @@
+peft
+pandas
+scipy
+scikit-learn
+matplotlib
+seaborn
+opencv-python
+flask
+django
+requests
+beautifulsoup4
+lxml
+pyyaml

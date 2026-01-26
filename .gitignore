@@ -165,3 +165,5 @@ $RECYCLE.BIN/
 
 wandb/
 *.log
+
+*.run

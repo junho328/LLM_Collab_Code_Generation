@@ -1,6 +1,6 @@
 # model
 model:
-  name: "Qwen/Qwen2.5-Coder-3B"
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
   type: "qwen"
   temperature: 0.7
   top_p: 0.9
@@ -14,16 +14,16 @@ model:
 
 # dataset
 dataset:
-  name: "OpenMLRL/MBPP"
+  name: "/home/work/aipr-jhna/huggingface_hub/mbpp"
   type: "mbpp"
-  train_split: "test[15:65]"
-  eval_split: "test[:15]"
+  train_split: "test[50:]"
+  eval_split: "test[:50]"
 
 seed: 42
 
 # output
 output:
-  base_dir: "output"
+  base_dir: "/home/work/aipr-jhna/output/mbpp"
   save_final_model: false
   verbose: false
 
@@ -35,9 +35,9 @@ external:
 # magrpo
 magrpo:
   num_turns: 2
-  num_train_epochs: 8
+  num_train_epochs: 6
   per_device_train_batch_size: 1
-  rollout_buffer_size: 2
+  rollout_buffer_size: 128
   learning_rate: 3.0e-5
   eval_interval: 4
   eval_num_samples: 4
@@ -51,7 +51,7 @@ magrpo:
   discount: 0.9
   termination_threshold: -0.2
 
-  logging_steps: 50
+  logging_steps: 5
   save_steps: 200
 
 reward_processor:
@@ -60,8 +60,8 @@ reward_processor:
   shift: -4
 # wandb
 wandb:
-  project: "comlrl"
-  entity: "OpenMLRL"
-  name: "magrpo_mbpp"
-  dir: "output"
+  project: "MAGRPO-MBPP"
+  entity: "contrl"
+  name: "magrpo_mbpp_qwen2.5-1.5b"
+  dir: "/home/work/aipr-jhna/output/mbpp"
   tags: ["magrpo", "mbpp", "multi-agent"]
