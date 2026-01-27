@@ -486,10 +486,89 @@ def extract_imports_from_prompt(prompt):
     return "\n".join(unique_imports)
 
 
+def is_template_placeholder_function(func_code):
+    """
+    Check if a function is a template placeholder (example code from prompt).
+    Returns True if the function appears to be a template, not real code.
+    """
+    if not func_code or not isinstance(func_code, str):
+        return True
+    
+    func_code = func_code.strip()
+    
+    # Pattern 1: def func(...): - ellipsis parameters
+    if re.search(r'def\s+\w+\s*\(\s*\.\.\.\s*\)\s*:', func_code):
+        return True
+    
+    # Pattern 2: Generic placeholder parameters (param1, param2) with undefined return
+    # Check if function has generic parameter names AND returns undefined 'result'
+    generic_params_pattern = r'def\s+\w+\s*\(\s*(param\d+\s*,?\s*)+\)\s*:'
+    if re.search(generic_params_pattern, func_code):
+        # Check if it just returns 'result' without defining it
+        lines = func_code.strip().split('\n')
+        body_lines = [l.strip() for l in lines[1:] if l.strip() and not l.strip().startswith('#')]
+        
+        # If body is just "return result" or similar placeholder
+        if len(body_lines) <= 1:
+            for line in body_lines:
+                if line == 'return result' or line == 'return None' or line == 'pass':
+                    return True
+        
+        # Check if 'result' is returned but never defined
+        has_return_result = any('return result' in l for l in body_lines)
+        has_result_assignment = any(re.search(r'\bresult\s*=', l) for l in body_lines)
+        if has_return_result and not has_result_assignment:
+            return True
+    
+    # Pattern 3: Function body is just a comment or placeholder
+    lines = func_code.strip().split('\n')
+    body_lines = [l.strip() for l in lines[1:] if l.strip()]
+    
+    # Remove docstrings from consideration
+    in_docstring = False
+    actual_body = []
+    for line in body_lines:
+        if line.startswith('"""') or line.startswith("'''"):
+            if in_docstring:
+                in_docstring = False
+            elif line.count('"""') >= 2 or line.count("'''") >= 2:
+                continue  # Single-line docstring
+            else:
+                in_docstring = True
+            continue
+        if not in_docstring:
+            actual_body.append(line)
+    
+    # If no actual body or just placeholder comments
+    if not actual_body:
+        return True
+    
+    # If body is just placeholder patterns
+    placeholder_body_patterns = [
+        r'^return\s+result$',
+        r'^pass$',
+        r'^#\s*(your|implementation|function|code)\s*(code|here|implementation)?',
+        r'^\.\.\.$',
+    ]
+    if len(actual_body) == 1:
+        for pattern in placeholder_body_patterns:
+            if re.match(pattern, actual_body[0], re.IGNORECASE):
+                return True
+    
+    return False
+
+
 def cleanup_code(code):
     """
-    Extract function definitions from code that may contain explanatory text,
+    Extract function and class definitions from code that may contain explanatory text,
     markdown, and other non-executable content.
+    
+    This function extracts both:
+    - Function definitions (def ...)
+    - Class definitions (class ...) - needed when functions reference external classes
+    
+    IMPORTANT: Properly handles nested functions by checking indentation level.
+    Nested functions (indented def statements) are kept as part of their parent function.
     """
     if not code or not isinstance(code, str):
         return ""
@@ -542,71 +621,126 @@ def cleanup_code(code):
     # Step 2: Split into lines for processing
     lines = code.split("\n")
 
-    # Step 3: Find and extract function definitions
-    function_blocks = []
-    current_function = []
-    in_function = False
+    # Step 3: Find and extract TOP-LEVEL function AND class definitions
+    # Key change: Only start new blocks for TOP-LEVEL definitions (indent = 0 or same as previous top-level)
+    code_blocks = []  # Will contain both functions and classes
+    current_block = []
+    in_block = False
+    block_type = None  # 'function' or 'class'
     base_indent = 0
+
+    def get_indent(line):
+        """Get the indentation level of a line."""
+        return len(line) - len(line.lstrip())
 
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
+        current_indent = get_indent(line)
+
+        # Check if this line starts a TOP-LEVEL class definition (not nested)
+        class_match = re.match(r"^(\s*)class\s+\w+", line)
+        if class_match:
+            line_indent = len(class_match.group(1))
+            # Only treat as new block if it's at the same or lower indent level than base
+            # (i.e., not a nested class inside a function/class)
+            if not in_block or line_indent <= base_indent:
+                # If we were already in a block, save it
+                if in_block and current_block:
+                    code_blocks.append(("\n".join(current_block), block_type))
+
+                # Start new class block
+                current_block = [line]
+                in_block = True
+                block_type = 'class'
+                base_indent = line_indent
+                i += 1
+                continue
+            else:
+                # This is a nested class - include it in current block
+                current_block.append(line)
+                i += 1
+                continue
 
         # Check if this line starts a function definition
-        if re.match(r"^(\s*)def\s+\w+\s*\(", line):
-            # If we were already in a function, save it
-            if in_function and current_function:
-                function_blocks.append("\n".join(current_function))
+        func_match = re.match(r"^(\s*)def\s+\w+\s*\(", line)
+        if func_match:
+            line_indent = len(func_match.group(1))
+            # Only treat as new block if it's at the same or lower indent level than base
+            # (i.e., not a nested function inside another function/class)
+            if not in_block or line_indent <= base_indent:
+                # If we were already in a block, save it
+                if in_block and current_block:
+                    code_blocks.append(("\n".join(current_block), block_type))
 
-            # Start new function
-            current_function = [line]
-            in_function = True
-            base_indent = len(line) - len(line.lstrip())
+                # Start new function
+                current_block = [line]
+                in_block = True
+                block_type = 'function'
+                base_indent = line_indent
+                i += 1
+                continue
+            else:
+                # This is a nested function - include it in current block
+                current_block.append(line)
+                i += 1
+                continue
 
-        elif in_function:
-            # We're inside a function definition
+        if in_block:
+            # We're inside a block definition (function or class)
             if stripped == "":
                 # Empty line - include it
-                current_function.append(line)
-            elif line.startswith(" " * (base_indent + 1)) or line.startswith("\t"):
-                # This line is indented more than the function def - it's part of the function
-                current_function.append(line)
+                current_block.append(line)
+            elif current_indent > base_indent:
+                # This line is indented more than the block def - it's part of the block
+                current_block.append(line)
             elif stripped.startswith('"""') or stripped.startswith("'''"):
-                # Handle docstrings that might be at the same level as def
-                current_function.append(line)
+                # Handle docstrings that might be at the same level as def/class
+                current_block.append(line)
                 # Look for closing docstring
                 quote_type = '"""' if stripped.startswith('"""') else "'''"
                 if not (stripped.endswith(quote_type) and len(stripped) > 3):
                     # Multi-line docstring, find the end
                     i += 1
                     while i < len(lines):
-                        current_function.append(lines[i])
+                        current_block.append(lines[i])
                         if quote_type in lines[i]:
                             break
                         i += 1
             else:
-                # This line is not part of the function (back to base level or less)
-                # End current function
-                if current_function:
-                    function_blocks.append("\n".join(current_function))
-                current_function = []
-                in_function = False
+                # This line is not part of the block (back to base level or less)
+                # End current block
+                if current_block:
+                    code_blocks.append(("\n".join(current_block), block_type))
+                current_block = []
+                in_block = False
+                block_type = None
 
-                # Check if this line starts a new function
-                if re.match(r"^(\s*)def\s+\w+\s*\(", line):
-                    current_function = [line]
-                    in_function = True
-                    base_indent = len(line) - len(line.lstrip())
+                # Don't increment i here - reprocess this line at next iteration
+                # to check if it starts a new block
+                continue
 
         i += 1
 
-    # Don't forget the last function if we ended while still in one
-    if in_function and current_function:
-        function_blocks.append("\n".join(current_function))
+    # Don't forget the last block if we ended while still in one
+    if in_block and current_block:
+        code_blocks.append(("\n".join(current_block), block_type))
 
-    # Step 4: Join all function blocks
-    result = "\n\n".join(function_blocks)
+    # Step 3.5: Filter out template placeholder functions (only for functions, keep classes)
+    filtered_blocks = []
+    for block_content, btype in code_blocks:
+        if btype == 'class':
+            # Always keep class definitions
+            filtered_blocks.append(block_content)
+        elif btype == 'function':
+            # Filter out template placeholder functions
+            if not is_template_placeholder_function(block_content):
+                filtered_blocks.append(block_content)
+
+    # Step 4: Join all blocks (classes first, then functions for proper ordering)
+    # Actually, preserve original order to maintain any dependencies
+    result = "\n\n".join(filtered_blocks)
 
     # Step 5: Final cleanup - remove any remaining explanatory text that might have slipped through
     # Remove lines that look like natural language explanations
@@ -625,6 +759,7 @@ def cleanup_code(code):
                 keyword in line
                 for keyword in [
                     "def ",
+                    "class ",
                     "return ",
                     "if ",
                     "for ",
@@ -643,8 +778,8 @@ def cleanup_code(code):
 
     result = "\n".join(cleaned_lines).strip()
 
-    # Step 6: Validate that we have actual function definitions
-    if not re.search(r"def\s+\w+\s*\(", result):
+    # Step 6: Validate that we have actual code definitions (function or class)
+    if not re.search(r"(def|class)\s+\w+", result):
         return ""
 
     return result
@@ -654,6 +789,9 @@ def extract_specific_function(code, function_name):
     """
     Extract a specific function by name from the code.
     This is useful when you know exactly which function you want.
+    Filters out template placeholder functions.
+    
+    IMPORTANT: Properly handles nested functions by tracking indentation levels.
     """
     if not code or not function_name:
         return ""
@@ -667,23 +805,66 @@ def extract_specific_function(code, function_name):
     in_target_function = False
     base_indent = 0
 
-    for line in lines:
-        if re.match(rf"^(\s*)def\s+{re.escape(function_name)}\s*\(", line):
+    def get_indent(line):
+        """Get the indentation level of a line."""
+        return len(line) - len(line.lstrip())
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # Check if this line starts the target function
+        match = re.match(rf"^(\s*)def\s+{re.escape(function_name)}\s*\(", line)
+        if match and not in_target_function:
             function_lines = [line]
             in_target_function = True
-            base_indent = len(line) - len(line.lstrip())
-        elif in_target_function:
-            if (
-                line.strip() == ""
-                or line.startswith(" " * (base_indent + 1))
-                or line.startswith("\t")
-            ):
+            base_indent = len(match.group(1))
+            i += 1
+            continue
+            
+        if in_target_function:
+            current_indent = get_indent(line)
+            
+            # Empty lines are always included
+            if stripped == "":
                 function_lines.append(line)
-            else:
-                # End of function
-                break
+                i += 1
+                continue
+            
+            # Lines with greater indentation are part of the function
+            if current_indent > base_indent:
+                function_lines.append(line)
+                i += 1
+                continue
+            
+            # Handle docstrings at the same level
+            if stripped.startswith('"""') or stripped.startswith("'''"):
+                function_lines.append(line)
+                quote_type = '"""' if stripped.startswith('"""') else "'''"
+                if not (stripped.endswith(quote_type) and len(stripped) > 3):
+                    i += 1
+                    while i < len(lines):
+                        function_lines.append(lines[i])
+                        if quote_type in lines[i]:
+                            break
+                        i += 1
+                i += 1
+                continue
+            
+            # If we hit a line at base_indent or less, the function is done
+            # (unless it's a nested function/class which would have higher indent)
+            break
+        
+        i += 1
 
-    return "\n".join(function_lines).strip()
+    extracted = "\n".join(function_lines).strip()
+    
+    # Check if extracted function is a template placeholder
+    if extracted and is_template_placeholder_function(extracted):
+        return ""
+    
+    return extracted
 
 
 def check_function_definition(code, function_name, description):

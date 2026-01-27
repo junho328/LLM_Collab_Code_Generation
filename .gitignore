@@ -167,3 +167,5 @@ wandb/
 *.log
 
 *.run
+
+output/

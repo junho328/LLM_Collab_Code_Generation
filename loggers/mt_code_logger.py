@@ -10,6 +10,8 @@ def mt_humaneval_logger(
     prompts: Optional[List[str]] = None,
     # Support for single-turn mode (from magrpo.py)
     agent_completions: Optional[List[List[str]]] = None,
+    # Dataset type to select appropriate logger
+    dataset_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Logger for code generation tasks with aux + main function collaboration.
@@ -19,13 +21,20 @@ def mt_humaneval_logger(
         agent_completions_turns: Multi-turn mode - List per agent -> per sample -> per turn completions
         test_cases: List of test cases
         entry_points: List of entry point function names
-        prompts: Optional list of prompts for import extraction
+        prompts: Optional list of prompts for import extraction (HumanEval) or code_prompts (BigCodeBench)
         agent_completions: Single-turn mode - List per agent -> per sample completions
+        dataset_type: Type of dataset ("humaneval", "bigcodebench", etc.) to select appropriate logger
 
     Returns:
         List of metric dictionaries
     """
-    from loggers.code_logger import code_reward_logger
+    # Select appropriate logger based on dataset type
+    is_bigcodebench = dataset_type and dataset_type.lower() in ["bigcodebench", "bcb"]
+    
+    if is_bigcodebench:
+        from loggers.code_logger import code_reward_logger_bigcodebench as reward_logger
+    else:
+        from loggers.code_logger import code_reward_logger as reward_logger
 
     all_metrics = []
 
@@ -82,8 +91,9 @@ def mt_humaneval_logger(
                 for j in range(len(test_cases))
             ]
 
-            # Get metrics for this turn using the single-turn logger
-            turn_metrics = code_reward_logger(
+            # Get metrics for this turn using the appropriate logger
+            # For BigCodeBench, prompts contains code_prompts
+            turn_metrics = reward_logger(
                 [turn_completions1[i]],
                 [turn_completions2[i]],
                 [test_cases[i]],
@@ -149,6 +159,7 @@ def aggregate_mt_humaneval_metrics_for_logging(
             "passed_tests",
             "total_tests",
             "passed_rate",
+            "all_tests_passed",  # NEW: 1 if all tests passed, 0 otherwise
             "timeout_num",
             "bonus_reward",
             "aux_usage_bonus",
@@ -162,6 +173,16 @@ def aggregate_mt_humaneval_metrics_for_logging(
             values = [sample[key] for sample in metrics_list if key in sample]
             if values:
                 aggregated[f"{turn_prefix}/avg_{metric}"] = np.mean(values)
+
+        # NEW: Compute all_tests_passed count and rate
+        all_passed_key = f"{turn_prefix}/all_tests_passed"
+        all_passed_values = [sample.get(all_passed_key, 0) for sample in metrics_list]
+        if all_passed_values:
+            # Count of samples where all tests passed
+            all_passed_count = sum(1 for v in all_passed_values if v == 1)
+            aggregated[f"{turn_prefix}/all_tests_passed_count"] = all_passed_count
+            # Rate of samples where all tests passed (as percentage of total eval samples)
+            aggregated[f"{turn_prefix}/all_tests_passed_rate"] = all_passed_count / len(all_passed_values)
 
         # No improvement metrics
 

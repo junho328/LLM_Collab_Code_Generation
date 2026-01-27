@@ -4,6 +4,9 @@ The training mode is determined by the num_turns parameter in the config file.
 Supports multiple datasets and configurations via YAML files.
 """
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import argparse
 import json
 import os
@@ -53,7 +56,10 @@ def load_json_dataset(
     json_path: str,
     train_split: str,
     eval_split: str,
-    verbose: bool = False
+    verbose: bool = False,
+    shuffle_train: bool = False,
+    shuffle_eval: bool = False,
+    seed: int = 42,
 ) -> Tuple[Any, Any]:
     """
     Load dataset from a JSON or JSONL file.
@@ -63,6 +69,9 @@ def load_json_dataset(
         train_split: Split specification like "train[:500]" or "0:500"
         eval_split: Split specification like "train[500:550]" or "500:550"
         verbose: Whether to print loading information
+        shuffle_train: Whether to shuffle the training dataset
+        shuffle_eval: Whether to shuffle the evaluation dataset
+        seed: Random seed for shuffling
         
     Returns:
         Tuple of (train_dataset, eval_dataset)
@@ -130,84 +139,39 @@ def load_json_dataset(
     train_dataset = Dataset.from_list(train_data)
     eval_dataset = Dataset.from_list(eval_data)
     
+    # Shuffle datasets if requested
+    if shuffle_train:
+        train_dataset = train_dataset.shuffle(seed=seed)
+        if verbose:
+            print(f"Train dataset shuffled with seed={seed}")
+    
+    if shuffle_eval:
+        eval_dataset = eval_dataset.shuffle(seed=seed)
+        if verbose:
+            print(f"Eval dataset shuffled with seed={seed}")
+    
     return train_dataset, eval_dataset
-
-
-def aux_function_formatter(example: Dict[str, Any]) -> str:
-    """Formatter for the auxiliary function generator (Agent 1) for code tasks."""
-    prompt = example.get("prompt", "")
-    entry_point = example.get("entry_point", "")
-
-    params = extract_function_params_from_prompt(prompt)
-
-    if not params or not entry_point:
-        return "Error: Could not extract function information from prompt."
-
-    prompt_text = f"""Create a helper function for this coding problem.
-
-Problem:
-{prompt}
-
-IMPORTANT INSTRUCTIONS:
-- Output ONLY the function code, no explanations or examples
-- Do NOT include markdown code blocks (```python)
-- Do NOT include any text before or after the function
-- Do NOT include test cases or example usage
-- Create a helper function named 'aux' that can assist the main function
-- The function should return useful data for solving the problem
-- Define actual parameters for the aux function (not "...")
-
-Example format (replace with actual implementation):
-
-def aux(param1, param2):
-    # implementation here
-    return result
-"""
-
-    return prompt_text
-
-
-def main_function_formatter(example: Dict[str, Any]) -> str:
-    """Formatter for the main function generator (Agent 2) for code tasks."""
-    prompt = example.get("prompt", "")
-    entry_point = example.get("entry_point", "")
-
-    params = extract_function_params_from_prompt(prompt)
-
-    if not params or not entry_point:
-        return "Error: Could not extract function information from prompt."
-
-    params_str = ", ".join(params)
-
-    prompt_text = f"""Solve this coding problem by implementing the required function.
-
-Problem:
-{prompt}
-
-You have access to a helper function: aux()
-
-IMPORTANT INSTRUCTIONS:
-- Output ONLY the function code, no explanations or examples
-- Do NOT include markdown code blocks (```python)
-- Do NOT include any text before or after the function
-- Do NOT include test cases or example usage
-- Do NOT redefine the aux() function
-- Implement ONLY the '{entry_point}' function as specified
-- You can call aux() to assign value to a variable within your function if helpful
-
-Example format (replace with actual implementation):
-
-def {entry_point}({params_str}):
-    # implementation here
-    return result
-"""
-
-    return prompt_text
 
 
 # ============================================================================
 # BigCodeBench Formatters
 # ============================================================================
+
+def _extract_imports_for_prompt(code_prompt: str) -> str:
+    """Extract import statements from code_prompt for display in prompt."""
+    if not code_prompt:
+        return ""
+    
+    import_lines = []
+    for line in code_prompt.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            import_lines.append(stripped)
+        elif stripped.startswith("def "):
+            break  # Stop at function definition
+    
+    return "\n".join(import_lines)
+
 
 def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
     """Formatter for the auxiliary function generator (Agent 1) for BigCodeBench tasks."""
@@ -219,29 +183,27 @@ def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
     if not instruct_prompt:
         return "Error: Could not extract task information from BigCodeBench data."
 
-    prompt_text = f"""Create a helper function for this coding problem.
+    # Extract imports to show available libraries
+    available_imports = _extract_imports_for_prompt(code_prompt)
+    imports_section = ""
+    if available_imports:
+        imports_section = f"""Available libraries (already imported):
+{available_imports}
 
-Problem:
-{instruct_prompt}
+"""
 
-Code template:
-{code_prompt}
+    prompt_text = f"""Create a helper function named 'aux' for the following problem.
 
-IMPORTANT INSTRUCTIONS:
-- Output ONLY the function code, no explanations or examples
-- Do NOT include markdown code blocks (```python)
-- Do NOT include any text before or after the function
-- Do NOT include test cases or example usage
-- Create a helper function named 'aux' that can assist the main function '{entry_point}'
-- The function should return useful data for solving the problem
-- Do NOT include import statements (they will be added separately)
-- Define actual parameters for the aux function (not "...")
+Problem: {instruct_prompt}
 
-Example format (replace with actual implementation):
+{imports_section}RULES:
+1. Function name MUST be exactly 'aux' (not '{entry_point}')
+2. Write actual implementation code
+3. You can use the imported libraries.
+3. Return useful data that helps solve the problem
+4. Output ONLY the function code starting with 'def aux('
+5. No imports, no markdown, no explanations
 
-def aux(param1, param2):
-    # implementation here
-    return result
 """
 
     return prompt_text
@@ -270,37 +232,34 @@ def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
                     func_signature = line.strip()
                     break
 
+        # Extract imports to show available libraries
+        available_imports = _extract_imports_for_prompt(code_prompt)
+        imports_section = ""
+        if available_imports:
+            imports_section = f"""Available libraries (already imported):
+{available_imports}
+
+"""
+
         # Choose aux usage instruction based on config
         if force_aux_usage:
-            aux_instruction = "- You MUST call aux() in your implementation (required, not optional)"
+            aux_note = "You MUST use the helper function aux() if helpful."
         else:
-            aux_instruction = "- You can call aux() to help with the implementation"
+            aux_note = "You can use the helper function aux() if helpful."
 
-        prompt_text = f"""Solve this coding problem by implementing the required function.
+        prompt_text = f"""Implement the '{entry_point}' function for the following problem.
 
-Problem:
-{instruct_prompt}
+Problem: {instruct_prompt}
 
-Code template:
-{code_prompt}
+{imports_section}Function signature: {func_signature}
 
-You have access to a helper function: aux()
+RULES:
+1. Output ONLY the function code starting with 'def task_func('
+2. You can use the imported libraries.
+3. Return useful data that helps solve the problem
+4. {aux_note}
+5. No imports, no markdown, no explanations
 
-IMPORTANT INSTRUCTIONS:
-- Output ONLY the function code, no explanations or examples
-- Do NOT include markdown code blocks (```python)
-- Do NOT include any text before or after the function
-- Do NOT include test cases or example usage
-- Do NOT redefine the aux() function
-- Do NOT include import statements (they will be added separately)
-- Implement ONLY the '{entry_point}' function as specified
-{aux_instruction}
-
-Example format (replace with actual implementation):
-
-{func_signature if func_signature else f"def {entry_point}(param1, param2):"}
-    # implementation here
-    return result
 """
 
         return prompt_text
@@ -335,15 +294,104 @@ def get_formatters(dataset_type: str, num_agents: int, force_aux_usage: bool = F
 def get_logger_and_aggregator(dataset_type: str):
     """
     Get the logger and aggregator functions based on dataset type.
+    Returns a logger wrapper that passes dataset_type to enable proper test execution.
     """
     if dataset_type is None:
         return None, None
 
     # Use unified logger/aggregator for code datasets
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp", "bigcodebench", "bcb"]:
-        return mt_humaneval_logger, aggregate_mt_humaneval_metrics_for_logging
+        # Create a wrapper that passes dataset_type to the logger
+        def logger_wrapper(**kwargs):
+            return mt_humaneval_logger(dataset_type=dataset_type, **kwargs)
+        
+        return logger_wrapper, aggregate_mt_humaneval_metrics_for_logging
 
     return None, None
+
+
+# ============================================================================
+# Module-level reward wrapper functions (required for ProcessPoolExecutor pickling)
+# ============================================================================
+
+def _humaneval_reward_wrapper(*agent_completions, batch_items=None, prompts=None):
+    """Reward wrapper for HumanEval/MBPP datasets (module-level for pickling)."""
+    if not agent_completions or len(agent_completions) < 1:
+        return []
+
+    # Choose aux from first agent if available when >=2, otherwise empty list
+    if len(agent_completions) >= 2:
+        completion1 = agent_completions[0]
+        completion2 = agent_completions[-1]
+    else:
+        completion1 = [""] * len(agent_completions[0])
+        completion2 = agent_completions[0]
+
+    test_cases = []
+    entry_points = []
+    original_prompts = []
+
+    if batch_items is not None:
+        for item in batch_items:
+            test_cases.append(item["test"])
+            entry_points.append(item["entry_point"])
+            original_prompts.append(item.get("prompt", ""))
+    else:
+        raise ValueError("batch_items must be provided for reward calculation")
+
+    return execution_reward_aux(
+        completion1, completion2, test_cases, entry_points, original_prompts
+    )
+
+
+def _bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=None):
+    """Reward wrapper for BigCodeBench dataset (module-level for pickling)."""
+    if not agent_completions or len(agent_completions) < 1:
+        return []
+
+    # Choose aux from first agent, main from last agent
+    if len(agent_completions) >= 2:
+        completion1 = agent_completions[0]
+        completion2 = agent_completions[-1]
+    else:
+        completion1 = [""] * len(agent_completions[0])
+        completion2 = agent_completions[0]
+
+    test_cases = []
+    entry_points = []
+    code_prompts = []
+    instruct_prompts = []
+
+    if batch_items is not None:
+        for item in batch_items:
+            # BigCodeBench uses 'test' for unittest code
+            test_cases.append(item.get("test", ""))
+            entry_points.append(item.get("entry_point", ""))
+            # BigCodeBench has code_prompt with imports and function signature
+            code_prompts.append(item.get("code_prompt", ""))
+            # BigCodeBench has instruct_prompt with task description
+            instruct_prompts.append(item.get("instruct_prompt", ""))
+    else:
+        raise ValueError("batch_items must be provided for BigCodeBench reward calculation")
+
+    return execution_reward_bigcodebench(
+        completion1, completion2, test_cases, entry_points, code_prompts, instruct_prompts
+    )
+
+
+# ============================================================================
+# Picklable reward processor class (required for ProcessPoolExecutor)
+# ============================================================================
+
+class PicklableRewardProcessor:
+    """A picklable reward processor that supports scale and shift operations."""
+    
+    def __init__(self, scale_factor: float = 1.0, shift_value: float = 0.0):
+        self.scale_factor = scale_factor
+        self.shift_value = shift_value
+    
+    def __call__(self, x: float) -> float:
+        return (x * self.scale_factor) + self.shift_value
 
 
 def get_reward_function(dataset_type: str, num_agents: int):
@@ -351,6 +399,8 @@ def get_reward_function(dataset_type: str, num_agents: int):
 
     For code tasks, map N-agent completions to the existing aux/main reward by
     using the first agent as aux and the last agent as main.
+    
+    Note: Returns module-level functions to support ProcessPoolExecutor pickling.
     """
     if dataset_type is None:
         raise ValueError(
@@ -358,72 +408,10 @@ def get_reward_function(dataset_type: str, num_agents: int):
         )
 
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
-
-        def reward_wrapper(*agent_completions, batch_items=None, prompts=None):
-            # agent_completions: tuple of lists (one list per agent), each list contains strings per completion
-            if not agent_completions or len(agent_completions) < 1:
-                return []
-
-            # Choose aux from first agent if available when >=2, otherwise empty list
-            if len(agent_completions) >= 2:
-                completion1 = agent_completions[0]
-                completion2 = agent_completions[-1]
-            else:
-                completion1 = [""] * len(agent_completions[0])
-                completion2 = agent_completions[0]
-
-            test_cases = []
-            entry_points = []
-            original_prompts = []
-
-            if batch_items is not None:
-                for item in batch_items:
-                    test_cases.append(item["test"])
-                    entry_points.append(item["entry_point"])
-                    original_prompts.append(item.get("prompt", ""))
-            else:
-                raise ValueError("batch_items must be provided for reward calculation")
-
-            return execution_reward_aux(
-                completion1, completion2, test_cases, entry_points, original_prompts
-            )
-
-        return reward_wrapper
+        return _humaneval_reward_wrapper
 
     if dataset_type.lower() in ["bigcodebench", "bcb"]:
-
-        def bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=None):
-            """Reward wrapper for BigCodeBench dataset."""
-            if not agent_completions or len(agent_completions) < 1:
-                return []
-
-            # Choose aux from first agent, main from last agent
-            if len(agent_completions) >= 2:
-                completion1 = agent_completions[0]
-                completion2 = agent_completions[-1]
-            else:
-                completion1 = [""] * len(agent_completions[0])
-                completion2 = agent_completions[0]
-
-            test_cases = []
-            entry_points = []
-            code_prompts = []
-
-            if batch_items is not None:
-                for item in batch_items:
-                    # BigCodeBench uses 'test' for unittest code
-                    test_cases.append(item.get("test", ""))
-                    entry_points.append(item.get("entry_point", ""))
-                    # BigCodeBench has code_prompt with imports and function signature
-                    code_prompts.append(item.get("code_prompt", ""))
-            else:
-                raise ValueError("batch_items must be provided for BigCodeBench reward calculation")
-
-            return execution_reward_bigcodebench(
-                completion1, completion2, test_cases, entry_points, code_prompts
-            )
-
-        return bigcodebench_reward_wrapper
+        return _bigcodebench_reward_wrapper
 
     raise ValueError(f"Unknown dataset type: {dataset_type}")
 
@@ -508,11 +496,18 @@ def main():
     train_dataset = None
     eval_dataset = None
     
+    # Get shuffle options from config
+    shuffle_train = config.get("dataset.shuffle_train", False)
+    shuffle_eval = config.get("dataset.shuffle_eval", False)
+    
     # Check if dataset_name is a local JSON/JSONL file
     if dataset_name.endswith('.json') or dataset_name.endswith('.jsonl'):
         try:
             train_dataset, eval_dataset = load_json_dataset(
-                dataset_name, train_split, eval_split, output_verbose
+                dataset_name, train_split, eval_split, output_verbose,
+                shuffle_train=shuffle_train,
+                shuffle_eval=shuffle_eval,
+                seed=seed_value,
             )
         except Exception as e:
             print(f"Error loading JSON dataset: {e}")
@@ -521,6 +516,16 @@ def main():
         try:
             train_dataset = load_dataset(dataset_name, split=train_split, trust_remote_code=True)
             eval_dataset = load_dataset(dataset_name, split=eval_split, trust_remote_code=True)
+            
+            # Shuffle HuggingFace datasets if requested
+            if shuffle_train:
+                train_dataset = train_dataset.shuffle(seed=seed_value)
+                if output_verbose:
+                    print(f"Train dataset shuffled with seed={seed_value}")
+            if shuffle_eval:
+                eval_dataset = eval_dataset.shuffle(seed=seed_value)
+                if output_verbose:
+                    print(f"Eval dataset shuffled with seed={seed_value}")
         except Exception as e:
             print(f"Error loading dataset: {e}")
             return
@@ -702,6 +707,8 @@ def main():
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
+    if "repetition_penalty" in magrpo_config:
+        magrpo_args_kwargs["repetition_penalty"] = magrpo_config.get("repetition_penalty")
     if lora_target_modules is not None:
         magrpo_args_kwargs["lora_target_modules"] = lora_target_modules
     if lora_path is not None:
@@ -791,20 +798,22 @@ def main():
     agents = [shared_model for _ in range(num_agents)]
 
 
+    # Create picklable reward processor (required for ProcessPoolExecutor)
     reward_processor = None
     if config.get("reward_processor.enabled", True):
         scale_factor = config.get("reward_processor.scale_factor", 1.0)
-        reward_processor = RewardProcessors.scale(factor=scale_factor)
         shift_val = config.get("reward_processor.shift", None)
+        shift_value = 0.0
         if shift_val is not None:
             try:
-                shift_val_f = float(shift_val)
+                shift_value = float(shift_val)
             except (TypeError, ValueError):
-                shift_val_f = None
-            if shift_val_f is not None:
-                shift_proc = RewardProcessors.shift(value=shift_val_f)
-                prev = reward_processor
-                reward_processor = (lambda p=prev, s=shift_proc: (lambda x: s(p(x))))()
+                shift_value = 0.0
+        # Use picklable class instead of lambdas
+        reward_processor = PicklableRewardProcessor(
+            scale_factor=scale_factor,
+            shift_value=shift_value
+        )
 
     # ------------------------------------------------------------------
     # Build trainer kwargs (grouped: model/data, reward/formatting, logging, args)

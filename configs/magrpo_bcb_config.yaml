@@ -1,6 +1,10 @@
+# export TMPDIR=/home/work/tmp
+# mkdir -p /home/work/tmp
+# export MPLBACKEND=Agg
+
 # model
 model:
-  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
   type: "qwen"
   temperature: 0.7
   top_p: 0.9
@@ -15,10 +19,12 @@ model:
 
 # dataset - BigCodeBench (local JSON file)
 dataset:
-  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/data/bcb.json"
+  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/data/bcb.jsonl"
   type: "bigcodebench"
-  train_split: "0:250"
-  eval_split: "250:264"
+  train_split: "0:256"
+  eval_split: "256:280"
+  shuffle_train: true
+  shuffle_eval: false
 
 # LoRA configuration
 use_lora: true
@@ -49,14 +55,15 @@ magrpo:
   per_device_train_batch_size: 1
   rollout_buffer_size: 32
   learning_rate: 2.0e-5
-  eval_interval: 20
-  eval_num_samples: 5
+  eval_interval: 4
+  eval_num_samples: 16
   num_generations: 4
-  max_new_tokens: 256
-  temperature: 0.6
-  top_p: 0.6
+  max_new_tokens: 1024
+  temperature: 0.9
+  top_p: 0.95
   top_k: null
-  joint_mode: aligned
+  repetition_penalty: 1.1  # Penalize repetitive generation
+  joint_mode: cross
   num_agents: 2
   logging_steps: 5
   save_steps: 250
@@ -66,16 +73,18 @@ magrpo:
   reward_parallel_backend: process  # 'process' for true parallelism, 'thread' for GIL-limited
   # Force main agent to use aux function (instead of optional)
   force_aux_usage: false
+  # Multi-GPU distributed training (required for torchrun)
+  use_distributed: true
 
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -2
+  shift: 0
 
 # wandb
 wandb:
   project: "BigCodeBench"
   entity: "contrl"
-  name: "magrpo_qwen2.5-1.5B_shift-2"
+  name: "magrpo_qwen2.5-1.5B_shift-0"
   dir: "output"
   tags: ["magrpo", "bigcodebench", "multi-agent"]

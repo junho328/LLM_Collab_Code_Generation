@@ -85,7 +85,7 @@ def execution_reward_aux(
         print("TESTING HUMANEVAL AUX + MAIN FUNCTION COLLABORATION")
         print("=" * 60)
         print(f"Entry point: {entry_point}")
-        print(f"Maximum possible reward: 4.0 (Level 3 max: 2.5)")
+        print(f"Maximum possible reward: 4.0 (Level 3 max: 3.0)")
 
         # Extract imports from prompt
         imports = extract_imports_from_prompt(prompt)
@@ -184,7 +184,9 @@ def execution_reward_aux(
         print("-" * 40)
 
         # 2.1 Concatenate functions with imports
-        combined_code = concatenate_functions(aux_func, main_func, imports)
+        # Use cleaned code (c1_clean, c2_clean) instead of extracted functions
+        # This preserves class definitions that functions may depend on
+        combined_code = concatenate_functions(c1_clean, c2_clean, imports)
 
         print("\n--- Combined Code ---")
         print(combined_code)
@@ -484,6 +486,7 @@ def execution_reward_bigcodebench(
     test_cases: List[str],
     entry_points: List[str],
     code_prompts: List[str] = None,
+    instruct_prompts: List[str] = None,
 ) -> List[float]:
     """
     Reward function for aux + main function collaboration on BigCodeBench tasks.
@@ -491,14 +494,14 @@ def execution_reward_bigcodebench(
     BigCodeBench uses unittest-based tests instead of simple assert statements.
 
     LEVEL 1:
-    - +0.4 reward if aux function is properly defined with return statement in completion1
-    - +0.6 reward if main function (entry_point) is properly defined with return statement in completion2
+    - +0.2 reward if aux function is properly defined with return statement in completion1
+    - +0.4 reward if main function (entry_point) is properly defined with return statement in completion2
 
     LEVEL 2:
-    - +0.5 reward if concatenated code has no syntax errors
+    - +0.4 reward if concatenated code has no syntax errors
 
     LEVEL 3:
-    - +0 to +1.0 reward proportional to correct tests passed
+    - +0 to +1.5 reward proportional to correct tests passed
     - +0.5 bonus if at least one test passes AND main function uses aux function
     - +1.0 bonus if main function is NOT just a wrapper around aux function
     - -0.5 deduction if aux function is called but return value is ignored
@@ -518,9 +521,13 @@ def execution_reward_bigcodebench(
     # Handle case where code_prompts is not provided
     if code_prompts is None:
         code_prompts = [""] * len(completion1)
+    
+    # Handle case where instruct_prompts is not provided
+    if instruct_prompts is None:
+        instruct_prompts = [""] * len(completion1)
 
-    for c1, c2, test_code, entry_point, code_prompt in zip(
-        completion1, completion2, test_cases, entry_points, code_prompts
+    for c1, c2, test_code, entry_point, code_prompt, instruct_prompt in zip(
+        completion1, completion2, test_cases, entry_points, code_prompts, instruct_prompts
     ):
         reward = 0.0
 
@@ -529,6 +536,11 @@ def execution_reward_bigcodebench(
         print("=" * 60)
         print(f"Entry point: {entry_point}")
         print(f"Maximum possible reward: 4.0")
+        
+        # Print task description if available
+        if instruct_prompt:
+            print(f"\n--- TASK DESCRIPTION ---")
+            print(instruct_prompt)
 
         # Extract imports from code_prompt (BigCodeBench provides imports in code_prompt)
         imports = extract_imports_from_code_prompt(code_prompt)
@@ -538,9 +550,9 @@ def execution_reward_bigcodebench(
 
         # Print raw completions for debugging
         print(f"\n--- RAW COMPLETION 1 (AUX) ---")
-        print(repr(c1[:500]) if len(c1) > 500 else repr(c1))
+        print(repr(c1))
         print(f"\n--- RAW COMPLETION 2 (MAIN) ---")
-        print(repr(c2[:500]) if len(c2) > 500 else repr(c2))
+        print(repr(c2))
 
         # Clean completions
         c1_clean = cleanup_code(c1)
@@ -551,9 +563,9 @@ def execution_reward_bigcodebench(
         main_func = extract_specific_function(c2, entry_point)
 
         print(f"\n--- EXTRACTED AUX FUNCTION ---")
-        print(repr(aux_func[:300]) if aux_func and len(aux_func) > 300 else repr(aux_func))
+        print(repr(aux_func))
         print(f"\n--- EXTRACTED MAIN FUNCTION ---")
-        print(repr(main_func[:300]) if main_func and len(main_func) > 300 else repr(main_func))
+        print(repr(main_func))
 
         # ================================================================
         # LEVEL 1: FUNCTION DEFINITION REQUIREMENTS
@@ -569,8 +581,8 @@ def execution_reward_bigcodebench(
         )
 
         if aux_check_passed:
-            reward += 0.4
-            print(f"✅ {aux_message}: +0.4 (total: {reward})")
+            reward += 0.2
+            print(f"✅ {aux_message}: +0.2 (total: {reward})")
         else:
             print(f"⚠️  {aux_message} (continuing without aux reward)")
 
@@ -580,8 +592,8 @@ def execution_reward_bigcodebench(
         )
 
         if main_check_passed:
-            reward += 0.6
-            print(f"✅ {main_message}: +0.6 (total: {reward})")
+            reward += 0.4
+            print(f"✅ {main_message}: +0.4 (total: {reward})")
         else:
             print(f"❌ {main_message}")
             level1_passed = False
@@ -601,18 +613,20 @@ def execution_reward_bigcodebench(
         print("-" * 40)
 
         # 2.1 Concatenate functions with imports
-        combined_code = concatenate_functions(aux_func, main_func, imports)
+        # Use cleaned code (c1_clean, c2_clean) instead of extracted functions
+        # This preserves class definitions that functions may depend on
+        combined_code = concatenate_functions(c1_clean, c2_clean, imports)
 
         print("\n--- Combined Code (truncated) ---")
-        print(combined_code[:800] if len(combined_code) > 800 else combined_code)
+        print(combined_code)
         print("--- End Code ---")
 
-        # 2.2 Check combined syntax (+0.5)
+        # 2.2 Check combined syntax (+0.4)
         syntax_passed, syntax_message = check_syntax(combined_code, "Combined code")
 
         if syntax_passed:
-            reward += 0.5
-            print(f"✅ {syntax_message}: +0.5 (total: {reward})")
+            reward += 0.4
+            print(f"✅ {syntax_message}: +0.4 (total: {reward})")
         else:
             print(f"❌ {syntax_message}")
             print("⏹️  STOPPING: Syntax requirements not met")
@@ -633,11 +647,11 @@ def execution_reward_bigcodebench(
 
         print(f"📝 Test results: {passed_tests}/{total_tests}")
         if error_msg:
-            print(f"⚠️  Error: {error_msg[:1000]}")
+            print(f"⚠️  Error: {error_msg}")
 
-        # Calculate proportional reward for test cases (0 to +1.0)
+        # Calculate proportional reward for test cases (0 to +1.5)
         if total_tests > 0:
-            test_reward = (passed_tests / total_tests) * 1.0
+            test_reward = (passed_tests / total_tests) * 1.5
             reward += test_reward
             print(f"✅ Test reward: +{test_reward:.2f} (total: {reward})")
 
