@@ -154,6 +154,165 @@ def load_json_dataset(
 
 
 # ============================================================================
+# HumanEval/MBPP Formatters
+# ============================================================================
+
+def aux_function_formatter(example: Dict[str, Any]) -> str:
+    """Formatter for the auxiliary function generator (Agent 1) for code tasks."""
+    prompt = example.get("prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    params = extract_function_params_from_prompt(prompt)
+
+    if not params or not entry_point:
+        return "Error: Could not extract function information from prompt."
+
+    prompt_text = f"""Create a helper function for this coding problem.
+
+Problem:
+{prompt}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Create a helper function named 'aux' that can assist the main function
+- The function should return useful data for solving the problem
+
+Your output should follow this format:
+
+def aux(...):\n # your function code here\nreturn result\n"""
+
+    return prompt_text
+
+
+def main_function_formatter(example: Dict[str, Any]) -> str:
+    """Formatter for the main function generator (Agent 2) for code tasks."""
+    prompt = example.get("prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    params = extract_function_params_from_prompt(prompt)
+
+    if not params or not entry_point:
+        return "Error: Could not extract function information from prompt."
+
+    params_str = ", ".join(params)
+
+    prompt_text = f"""Solve this coding problem by implementing the required function.
+
+Problem:
+{prompt}
+
+You have access to a helper function: aux(...)
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Do NOT redefine the aux() function
+- Implement ONLY the '{entry_point}' function as specified
+- You can call aux() to assign value to a variable within your function if helpful
+
+Your output should follow this format:
+
+def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+
+    return prompt_text
+
+
+# ============================================================================
+# Mental Simulation Inference Formatters
+# ============================================================================
+
+def create_inference_formatter_humaneval(example: Dict[str, Any]) -> str:
+    """Inference formatter for HumanEval/MBPP mental simulation."""
+    prompt = example.get("prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    return f"""Before implementing the main function '{entry_point}', predict how your partner will implement the helper function 'aux'.
+
+Problem:
+{prompt}
+
+Write your prediction of the 'aux' helper function implementation. Output ONLY the function code starting with 'def aux(':
+
+"""
+
+
+def create_inference_formatter_bigcodebench(example: Dict[str, Any]) -> str:
+    """Inference formatter for BigCodeBench mental simulation."""
+    instruct_prompt = example.get("instruct_prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    return f"""Before implementing the main function '{entry_point}', predict how your partner will implement the helper function 'aux'.
+
+Problem: {instruct_prompt}
+
+Write your prediction of the 'aux' helper function implementation. Output ONLY the function code starting with 'def aux(':
+
+"""
+
+
+def create_conditioned_formatter_humaneval(example: Dict[str, Any], inference_text: str) -> str:
+    """Create conditioned prompt for HumanEval/MBPP after inference."""
+    prompt = example.get("prompt", "")
+    entry_point = example.get("entry_point", "")
+    params = extract_function_params_from_prompt(prompt)
+    params_str = ", ".join(params) if params else ""
+
+    return f"""Your partner will write the helper function like this:
+
+{inference_text}
+
+Considering this helper function implementation, solve the coding problem by implementing the required function.
+
+Problem:
+{prompt}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations
+- Implement ONLY the '{entry_point}' function
+- You can call aux() if it helps solve the problem
+
+def {entry_point}({params_str}):
+"""
+
+
+def create_conditioned_formatter_bigcodebench(example: Dict[str, Any], inference_text: str) -> str:
+    """Create conditioned prompt for BigCodeBench after inference."""
+    instruct_prompt = example.get("instruct_prompt", "")
+    code_prompt = example.get("code_prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    # Extract function signature
+    func_signature = ""
+    if code_prompt:
+        for line in code_prompt.split("\n"):
+            if line.strip().startswith(f"def {entry_point}"):
+                func_signature = line.strip()
+                break
+
+    return f"""Your partner will write the helper function like this:
+
+{inference_text}
+
+Considering this helper function implementation, solve the following problem.
+
+Problem: {instruct_prompt}
+
+Function signature: {func_signature}
+
+RULES:
+1. Output ONLY the function code starting with 'def {entry_point}('
+2. You can call aux() if it helps
+3. No imports, no markdown, no explanations
+
+"""
+
+
+# ============================================================================
 # BigCodeBench Formatters
 # ============================================================================
 
@@ -675,6 +834,10 @@ def main():
     lora_target_modules = config.get("lora_target_modules", magrpo_config.get("lora_target_modules", None))
     lora_path = config.get("lora_path", magrpo_config.get("lora_path", None))
 
+    # Mental simulation configuration
+    enable_mental_simulation = magrpo_config.get("enable_mental_simulation", False)
+    separate_agent_adapters = magrpo_config.get("separate_agent_adapters", False)
+
     magrpo_args_kwargs = {
         "output_dir": output_dir,
         "num_agents": num_agents,
@@ -704,6 +867,16 @@ def main():
         "lora_dropout": lora_dropout,
         # Multi-GPU
         "use_distributed": magrpo_config.get("use_distributed", False),
+        # Mental simulation and separate adapters
+        "enable_mental_simulation": enable_mental_simulation,
+        "separate_agent_adapters": separate_agent_adapters,
+        "inference_max_tokens": magrpo_config.get("inference_max_tokens", 512),
+        # Similarity reward schedule
+        "similarity_weight_schedule": magrpo_config.get("similarity_weight_schedule", "linear"),
+        "similarity_weight_start": magrpo_config.get("similarity_weight_start", 0.0),
+        "similarity_weight_end": magrpo_config.get("similarity_weight_end", 0.5),
+        "similarity_weight_warmup_steps": magrpo_config.get("similarity_weight_warmup_steps", 20),
+        "code_reward_threshold": magrpo_config.get("code_reward_threshold", 1.5),
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
@@ -869,6 +1042,22 @@ def main():
         trainer_kwargs["external_transition"] = external_transition_wrapper
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
+
+    # Set up similarity reward function for mental simulation mode
+    if enable_mental_simulation:
+        try:
+            from rewards.infer_similarity import get_similarity_reward_func
+            similarity_func = get_similarity_reward_func(normalize=True)
+            trainer.set_similarity_reward_func(similarity_func)
+            if output_verbose:
+                print("Mental simulation mode enabled with GraphCodeBERT similarity")
+                print(f"  - Similarity weight schedule: {magrpo_config.get('similarity_weight_schedule', 'linear')}")
+                print(f"  - Similarity weight: {magrpo_config.get('similarity_weight_start', 0.0)} -> {magrpo_config.get('similarity_weight_end', 0.5)}")
+                print(f"  - Code reward threshold for R_sim: {magrpo_config.get('code_reward_threshold', 1.5)}")
+        except ImportError as e:
+            print(f"Warning: Could not import similarity module: {e}")
+            print("Mental simulation will run without similarity rewards.")
+
     trainer.train()
     
     # Flush completion logger at the end of training

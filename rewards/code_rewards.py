@@ -1,6 +1,6 @@
 import re
 import signal
-from typing import List
+from typing import List, Tuple, Optional, Callable
 import builtins
 
 # Verbose toggle (can be set by training scripts)
@@ -703,3 +703,229 @@ def execution_reward_bigcodebench(
         rewards.append(reward)
 
     return rewards
+
+
+# =============================================================================
+# Differential Reward Computation for Mental Simulation Mode
+# =============================================================================
+
+
+def compute_agent2_differential_rewards(
+    inference_code: str,
+    main_code: str,
+    agent1_actual_code: str,
+    code_reward: float,
+    lambda_t: float,
+    code_threshold: float = 1.5,
+    similarity_func: Optional[Callable[[str, str], float]] = None,
+) -> Tuple[float, float]:
+    """
+    Compute differential rewards for Agent 2's inference and main function tokens.
+    
+    This function implements the gated reward mechanism for mental simulation:
+    - Inference tokens receive: R_corr + (lambda_t * R_sim) if R_corr >= threshold, else R_corr
+    - Main function tokens receive: R_corr only
+    
+    The gating ensures Agent 2 doesn't focus on mimicking Agent 1 at the expense
+    of code quality. Only when the code passes quality threshold does the
+    similarity reward matter.
+    
+    Args:
+        inference_code: Agent 2's inference/prediction of Agent 1's implementation.
+        main_code: Agent 2's generated main function.
+        agent1_actual_code: Agent 1's actual helper function implementation.
+        code_reward: The code correctness reward (R_corr) from test execution.
+        lambda_t: Current weight for similarity reward (from curriculum schedule).
+        code_threshold: Minimum code reward to enable similarity reward (default 1.5).
+            Approximately 37.5% of max 4.0 reward, meaning at least basic
+            function structure and some tests passing.
+        similarity_func: Optional function to compute similarity. If None, uses
+            GraphCodeBERT-based similarity from infer_similarity module.
+    
+    Returns:
+        Tuple of (inference_reward, main_reward):
+        - inference_reward: Reward for inference tokens (potentially includes R_sim)
+        - main_reward: Reward for main function tokens (R_corr only)
+    
+    Example:
+        >>> r_infer, r_main = compute_agent2_differential_rewards(
+        ...     inference_code="def aux(x): return x * 2",
+        ...     main_code="def task_func(y): return aux(y) + 1",
+        ...     agent1_actual_code="def aux(n): return n * 2",
+        ...     code_reward=2.5,
+        ...     lambda_t=0.3,
+        ...     code_threshold=1.5,
+        ... )
+        >>> # r_infer will include similarity bonus since code_reward >= threshold
+        >>> # r_main will just be 2.5
+    """
+    # Main function tokens always get just the code reward
+    main_reward = code_reward
+    
+    # Check if code reward meets threshold for similarity bonus
+    if code_reward >= code_threshold:
+        # Compute similarity reward
+        if similarity_func is not None:
+            r_sim = similarity_func(inference_code, agent1_actual_code)
+        else:
+            # Use default GraphCodeBERT similarity
+            try:
+                from rewards.infer_similarity import compute_inference_similarity
+                r_sim = compute_inference_similarity(inference_code, agent1_actual_code)
+            except ImportError:
+                # Fallback if similarity module not available
+                r_sim = 0.0
+        
+        # Inference tokens get code reward + weighted similarity reward
+        inference_reward = code_reward + lambda_t * r_sim
+    else:
+        # Gated: similarity reward is 0 when code quality is below threshold
+        inference_reward = code_reward
+    
+    return inference_reward, main_reward
+
+
+def compute_batch_differential_rewards(
+    inference_codes: List[str],
+    main_codes: List[str],
+    agent1_actual_codes: List[str],
+    code_rewards: List[float],
+    lambda_t: float,
+    code_threshold: float = 1.5,
+    similarity_func: Optional[Callable[[str, str], float]] = None,
+) -> Tuple[List[float], List[float]]:
+    """
+    Compute differential rewards for a batch of samples.
+    
+    This is more efficient than calling compute_agent2_differential_rewards
+    multiple times as it can batch similarity computations.
+    
+    Args:
+        inference_codes: List of Agent 2's inferences.
+        main_codes: List of Agent 2's main functions.
+        agent1_actual_codes: List of Agent 1's actual implementations.
+        code_rewards: List of code correctness rewards.
+        lambda_t: Current weight for similarity reward.
+        code_threshold: Minimum code reward to enable similarity reward.
+        similarity_func: Optional custom similarity function.
+    
+    Returns:
+        Tuple of (inference_rewards, main_rewards):
+        - inference_rewards: List of rewards for inference tokens
+        - main_rewards: List of rewards for main function tokens
+    """
+    n = len(inference_codes)
+    if not (n == len(main_codes) == len(agent1_actual_codes) == len(code_rewards)):
+        raise ValueError("All input lists must have the same length")
+    
+    inference_rewards = []
+    main_rewards = []
+    
+    # Identify which samples qualify for similarity bonus
+    qualifying_indices = [i for i, r in enumerate(code_rewards) if r >= code_threshold]
+    
+    # Compute similarity rewards in batch for qualifying samples
+    similarity_rewards = [0.0] * n
+    
+    if qualifying_indices and lambda_t > 0:
+        if similarity_func is not None:
+            # Use provided similarity function
+            for i in qualifying_indices:
+                similarity_rewards[i] = similarity_func(
+                    inference_codes[i], agent1_actual_codes[i]
+                )
+        else:
+            # Use batch similarity computation
+            try:
+                from rewards.infer_similarity import compute_batch_inference_similarity
+                qualifying_inferences = [inference_codes[i] for i in qualifying_indices]
+                qualifying_actuals = [agent1_actual_codes[i] for i in qualifying_indices]
+                batch_similarities = compute_batch_inference_similarity(
+                    qualifying_inferences, qualifying_actuals
+                )
+                for idx, i in enumerate(qualifying_indices):
+                    similarity_rewards[i] = batch_similarities[idx]
+            except ImportError:
+                # Fallback to individual computation
+                try:
+                    from rewards.infer_similarity import compute_inference_similarity
+                    for i in qualifying_indices:
+                        similarity_rewards[i] = compute_inference_similarity(
+                            inference_codes[i], agent1_actual_codes[i]
+                        )
+                except ImportError:
+                    pass  # Leave similarity rewards as 0
+    
+    # Compute final rewards
+    for i in range(n):
+        main_rewards.append(code_rewards[i])
+        if i in qualifying_indices:
+            inference_rewards.append(code_rewards[i] + lambda_t * similarity_rewards[i])
+        else:
+            inference_rewards.append(code_rewards[i])
+    
+    return inference_rewards, main_rewards
+
+
+def create_gated_reward_wrapper(
+    base_reward_func: Callable,
+    lambda_t_getter: Callable[[], float],
+    code_threshold: float = 1.5,
+    similarity_func: Optional[Callable[[str, str], float]] = None,
+) -> Callable:
+    """
+    Create a reward wrapper that computes both base code rewards and
+    differential rewards for mental simulation mode.
+    
+    This wrapper is designed to be used with the MAGRPOTrainer.
+    
+    Args:
+        base_reward_func: The original reward function (e.g., execution_reward_aux).
+        lambda_t_getter: A callable that returns the current lambda(t) value.
+        code_threshold: Minimum code reward for similarity bonus.
+        similarity_func: Optional custom similarity function.
+    
+    Returns:
+        Wrapped reward function that returns both base rewards and differential info.
+    """
+    def wrapped_reward_func(
+        *agent_completions,
+        batch_items=None,
+        inference_codes=None,
+        **kwargs,
+    ):
+        # Compute base code rewards
+        base_rewards = base_reward_func(*agent_completions, batch_items=batch_items, **kwargs)
+        
+        # If inference codes provided, compute differential rewards
+        if inference_codes is not None and len(agent_completions) >= 2:
+            lambda_t = lambda_t_getter()
+            agent1_codes = agent_completions[0]  # Agent 1's actual implementations
+            
+            inference_rewards = []
+            main_rewards = []
+            
+            for i, (r, infer, actual) in enumerate(zip(
+                base_rewards, inference_codes, agent1_codes
+            )):
+                r_infer, r_main = compute_agent2_differential_rewards(
+                    inference_code=infer,
+                    main_code=agent_completions[-1][i] if len(agent_completions[-1]) > i else "",
+                    agent1_actual_code=actual,
+                    code_reward=r,
+                    lambda_t=lambda_t,
+                    code_threshold=code_threshold,
+                    similarity_func=similarity_func,
+                )
+                inference_rewards.append(r_infer)
+                main_rewards.append(r_main)
+            
+            return {
+                "base_rewards": base_rewards,
+                "inference_rewards": inference_rewards,
+                "main_rewards": main_rewards,
+            }
+        
+        return base_rewards
+    
+    return wrapped_reward_func
