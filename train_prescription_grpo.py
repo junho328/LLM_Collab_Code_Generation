@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 import wandb
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
@@ -47,6 +48,7 @@ from config import Config, add_config_args, parse_overrides
 from rewards.code_rewards import execution_reward_aux
 from comlrl.utils.reward_processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig
+from loggers.code_logger import code_reward_logger
 import external as external_ctx
 
 
@@ -357,12 +359,18 @@ class PrescriptionGRPOTrainer:
         max_new_tokens_code: int = 256,
         use_lora: bool = False,
         lora_config: Optional[Dict[str, Any]] = None,
+        rollout_buffer_size: int = 4,
+        verbose: bool = True,
     ):
         if not torch.cuda.is_available():
             raise RuntimeError("GPU not found. PrescriptionGRPOTrainer requires GPU.")
         
         self.args = args if args is not None else MAGRPOConfig()
         self.env_step = 0
+        self.verbose = verbose
+        
+        # Rollout buffer size for gradient accumulation
+        self.rollout_buffer_size = rollout_buffer_size
         
         # Separate max_new_tokens for prescription and code generation
         self.max_new_tokens_prescription = max_new_tokens_prescription
@@ -399,7 +407,8 @@ class PrescriptionGRPOTrainer:
             
             # Wrap public agent with LoRA
             public_agent = get_peft_model(public_agent, peft_config)
-            public_agent.print_trainable_parameters()
+            if self.verbose:
+                public_agent.print_trainable_parameters()
         
         # Public agent (trained)
         self.public_agent = public_agent
@@ -688,15 +697,24 @@ class PrescriptionGRPOTrainer:
         
         return total_loss
     
-    def _train_step(self, batch_item: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
+    def _train_step(
+        self, batch_item: Dict[str, Any], accumulate_grad: bool = True
+    ) -> Tuple[float, Dict[str, float]]:
         """
-        Execute one training step.
+        Execute one training step (rollout collection + loss computation).
         
         1. Public agent generates num_generations prescriptions
         2. Parse each prescription into aux/main guidelines
         3. Worker agents generate code for each prescription
         4. Compute rewards
-        5. Update public agent via GRPO
+        5. Compute GRPO loss and accumulate gradients
+        
+        Note: optimizer.step() is NOT called here. It should be called after
+        rollout_buffer_size samples have been accumulated.
+        
+        Args:
+            batch_item: Single batch item from dataset
+            accumulate_grad: If True, accumulate gradients (for gradient accumulation)
         
         Returns:
             Tuple of (loss_value, metrics_dict)
@@ -746,11 +764,10 @@ class PrescriptionGRPOTrainer:
         rewards = self._compute_rewards(aux_completions, main_completions, batch_item)
         self.env_step += len(rewards)
         
-        # Step 5: Update public agent
-        self.optimizer.zero_grad()
+        # Step 5: Compute loss and accumulate gradients (no optimizer step here)
+        # Note: Gradient scaling is done in train() based on actual buffer size
         loss = self._compute_grpo_loss(public_prompt, prescriptions, rewards)
         loss.backward()
-        self.optimizer.step()
         
         # Metrics
         metrics = {
@@ -763,7 +780,7 @@ class PrescriptionGRPOTrainer:
         return float(loss.item()), metrics
     
     def train(self):
-        """Main training loop."""
+        """Main training loop with rollout buffer for gradient accumulation."""
         if self.wandb_config and not self.wandb_initialized:
             self._init_wandb()
         
@@ -787,10 +804,28 @@ class PrescriptionGRPOTrainer:
             epoch_losses = []
             epoch_rewards = []
             
-            for batch_idx, batch in enumerate(dataloader):
+            # Rollout buffer for gradient accumulation
+            buffer_losses = []
+            buffer_rewards = []
+            buffer_count = 0
+            
+            # Zero gradients at the start of each epoch
+            self.optimizer.zero_grad()
+            
+            # Use tqdm progress bar when verbose is False
+            if not self.verbose:
+                data_iter = enumerate(tqdm(
+                    dataloader,
+                    total=len(dataloader),
+                    desc=f"Epoch {epoch+1}/{int(self.args.num_train_epochs)}",
+                ))
+            else:
+                data_iter = enumerate(dataloader)
+            
+            for batch_idx, batch in data_iter:
                 batch_item = batch[0]
                 
-                # Periodic evaluation
+                # Periodic evaluation (check at buffer boundaries)
                 if (
                     self.args.eval_interval > 0 and
                     batch_idx % self.args.eval_interval == 0 and
@@ -798,39 +833,86 @@ class PrescriptionGRPOTrainer:
                 ):
                     self.evaluate(num_samples=self.args.eval_num_samples)
                 
+                # Collect rollout and accumulate gradients
                 loss, metrics = self._train_step(batch_item)
-                epoch_losses.append(loss)
-                epoch_rewards.append(metrics["mean_reward"])
+                buffer_losses.append(loss)
+                buffer_rewards.append(metrics["mean_reward"])
+                buffer_count += 1
                 
-                # Logging
-                if (
-                    self.args.logging_steps > 0 and
-                    batch_idx % self.args.logging_steps == 0
-                ):
-                    log_dict = {
-                        "train/loss": loss,
-                        "train/mean_reward": metrics["mean_reward"],
-                        "train/max_reward": metrics["max_reward"],
-                    }
-                    if self.wandb_initialized:
-                        wandb.log(log_dict, step=self.env_step)
-                    print(f"[Epoch {epoch+1}][Batch {batch_idx}] Loss: {loss:.4f}, "
-                          f"Mean Reward: {metrics['mean_reward']:.4f}")
+                # Update when buffer is full
+                if buffer_count >= self.rollout_buffer_size:
+                    # Scale gradients by actual buffer size (like original MAGRPOTrainer)
+                    for param in self.public_agent.parameters():
+                        if param.grad is not None:
+                            param.grad /= buffer_count
+                    
+                    # Perform optimizer step
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    
+                    # Log accumulated buffer metrics
+                    avg_buffer_loss = float(np.mean(buffer_losses))
+                    avg_buffer_reward = float(np.mean(buffer_rewards))
+                    max_buffer_reward = float(max(buffer_rewards))
+                    
+                    epoch_losses.append(avg_buffer_loss)
+                    epoch_rewards.append(avg_buffer_reward)
+                    
+                    # Logging
+                    if self.args.logging_steps > 0:
+                        update_idx = batch_idx // self.rollout_buffer_size
+                        if update_idx % self.args.logging_steps == 0:
+                            log_dict = {
+                                "train/loss": avg_buffer_loss,
+                                "train/mean_reward": avg_buffer_reward,
+                                "train/max_reward": max_buffer_reward,
+                                "train/buffer_size": buffer_count,
+                            }
+                            if self.wandb_initialized:
+                                wandb.log(log_dict, step=self.env_step)
+                            if self.verbose:
+                                print(f"[Epoch {epoch+1}][Update {update_idx}] Loss: {avg_buffer_loss:.4f}, "
+                                      f"Mean Reward: {avg_buffer_reward:.4f} (buffer_size={buffer_count})")
+                    
+                    # Clear buffer
+                    buffer_losses = []
+                    buffer_rewards = []
+                    buffer_count = 0
+            
+            # Handle remaining samples in buffer at end of epoch
+            if buffer_count > 0:
+                # Scale gradients by actual buffer size (like original MAGRPOTrainer)
+                for param in self.public_agent.parameters():
+                    if param.grad is not None:
+                        param.grad /= buffer_count
+                
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                
+                avg_buffer_loss = float(np.mean(buffer_losses))
+                avg_buffer_reward = float(np.mean(buffer_rewards))
+                epoch_losses.append(avg_buffer_loss)
+                epoch_rewards.append(avg_buffer_reward)
             
             # Epoch summary
             epoch_log = {
-                "epoch/mean_loss": float(np.mean(epoch_losses)),
-                "epoch/mean_reward": float(np.mean(epoch_rewards)),
+                "epoch/mean_loss": float(np.mean(epoch_losses)) if epoch_losses else 0.0,
+                "epoch/mean_reward": float(np.mean(epoch_rewards)) if epoch_rewards else 0.0,
             }
             if self.wandb_initialized:
                 wandb.log(epoch_log, step=self.env_step)
     
     def evaluate(self, num_samples: int = 4) -> Dict[str, float]:
-        """Evaluate the current model."""
+        """Evaluate the current model with detailed metrics from code_reward_logger."""
         if self.eval_dataset is None:
             return {}
         
-        eval_rewards = []
+        # Collect all completions and batch items for batch logging
+        all_aux_codes = []
+        all_main_codes = []
+        all_test_cases = []
+        all_entry_points = []
+        all_prompts = []
         
         dataloader = DataLoader(
             self.eval_dataset,
@@ -852,11 +934,17 @@ class PrescriptionGRPOTrainer:
                     self.public_agent,
                     [public_prompt],
                     num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_prescription,  # Prescription
+                    max_new_tokens=self.max_new_tokens_prescription,
                     do_sample=False,
                 )[0]
                 
                 if not prescriptions:
+                    # Add empty completions to maintain alignment
+                    all_aux_codes.append("")
+                    all_main_codes.append("")
+                    all_test_cases.append(batch_item.get("test", ""))
+                    all_entry_points.append(batch_item.get("entry_point", ""))
+                    all_prompts.append(batch_item.get("prompt", ""))
                     continue
                 
                 prescription = prescriptions[0]
@@ -868,7 +956,7 @@ class PrescriptionGRPOTrainer:
                     self.worker_agents[0],
                     [aux_prompt],
                     num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_code,  # Code
+                    max_new_tokens=self.max_new_tokens_code,
                     do_sample=False,
                 )[0][0]
                 
@@ -877,18 +965,99 @@ class PrescriptionGRPOTrainer:
                     self.worker_agents[1],
                     [main_prompt],
                     num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_code,  # Code
+                    max_new_tokens=self.max_new_tokens_code,
                     do_sample=False,
                 )[0][0]
                 
-                rewards = self._compute_rewards([aux_code], [main_code], batch_item)
-                if rewards:
-                    eval_rewards.append(rewards[0])
+                # Collect for batch logging
+                all_aux_codes.append(aux_code)
+                all_main_codes.append(main_code)
+                all_test_cases.append(batch_item.get("test", ""))
+                all_entry_points.append(batch_item.get("entry_point", ""))
+                all_prompts.append(batch_item.get("prompt", ""))
         
-        metrics = {
-            "eval/mean_reward": float(np.mean(eval_rewards)) if eval_rewards else 0.0,
-            "eval/max_reward": float(max(eval_rewards)) if eval_rewards else 0.0,
-        }
+        # Get detailed metrics using code_reward_logger
+        total_evaluated = len(all_aux_codes)
+        if total_evaluated == 0:
+            return {}
+        
+        try:
+            all_detailed_metrics = code_reward_logger(
+                all_aux_codes,
+                all_main_codes,
+                all_test_cases,
+                all_entry_points,
+                all_prompts,
+            )
+        except Exception:
+            all_detailed_metrics = []
+        
+        # Aggregate metrics
+        if all_detailed_metrics:
+            # Metrics to aggregate
+            metric_keys = [
+                "level_1_reward",
+                "level_2_reward", 
+                "level_3_reward",
+                "test_reward",
+                "passed_tests",
+                "total_tests",
+                "passed_rate",
+                "timeout_num",
+                "bonus_reward",
+                "aux_usage_bonus",
+                "anti_wrapper_bonus",
+                "called_wo_used_deduction",
+                "total_reward",
+                "gated_total_reward",
+            ]
+            
+            # Calculate aggregated values
+            aggregated = {}
+            for key in metric_keys:
+                values = [m.get(key, 0.0) for m in all_detailed_metrics]
+                aggregated[key] = float(np.mean(values)) if values else 0.0
+            
+            # Calculate fully_passed_count and rate
+            fully_passed_count = sum(
+                1 for m in all_detailed_metrics 
+                if m.get("total_tests", 0) > 0 and m.get("passed_rate", 0.0) >= 1.0
+            )
+            fully_passed_rate = fully_passed_count / total_evaluated if total_evaluated > 0 else 0.0
+            
+            # Use turn_1 prefix for consistency with other trainers
+            metrics = {
+                # Level rewards
+                "eval/turn_1/level_1_reward": aggregated["level_1_reward"],
+                "eval/turn_1/level_2_reward": aggregated["level_2_reward"],
+                "eval/turn_1/level_3_reward": aggregated["level_3_reward"],
+                # Test metrics
+                "eval/turn_1/test_reward": aggregated["test_reward"],
+                "eval/turn_1/passed_rate": aggregated["passed_rate"],
+                "eval/turn_1/avg_passed_tests": aggregated["passed_tests"],
+                "eval/turn_1/avg_total_tests": aggregated["total_tests"],
+                "eval/turn_1/timeout_num": aggregated["timeout_num"],
+                # Collaboration metrics
+                "eval/turn_1/aux_usage_bonus": aggregated["aux_usage_bonus"],
+                "eval/turn_1/anti_wrapper_bonus": aggregated["anti_wrapper_bonus"],
+                "eval/turn_1/called_wo_used_deduction": aggregated["called_wo_used_deduction"],
+                "eval/turn_1/bonus_reward": aggregated["bonus_reward"],
+                # Overall metrics
+                "eval/turn_1/total_reward": aggregated["total_reward"],
+                "eval/turn_1/gated_total_reward": aggregated["gated_total_reward"],
+                # Fully passed metrics
+                "eval/turn_1/fully_passed_count": fully_passed_count,
+                "eval/turn_1/fully_passed_rate": fully_passed_rate,
+                "eval/turn_1/total_evaluated": total_evaluated,
+            }
+        else:
+            # Fallback if logger fails
+            metrics = {
+                "eval/turn_1/total_reward": 0.0,
+                "eval/turn_1/fully_passed_count": 0,
+                "eval/turn_1/fully_passed_rate": 0.0,
+                "eval/turn_1/total_evaluated": total_evaluated,
+            }
         
         if self.wandb_initialized:
             wandb.log(metrics, step=self.env_step)
@@ -905,11 +1074,13 @@ class PrescriptionGRPOTrainer:
         if self.use_lora:
             # Save only the LoRA adapter weights
             self.public_agent.save_pretrained(public_dir)
-            print(f"LoRA adapter saved to: {public_dir}")
+            if self.verbose:
+                print(f"LoRA adapter saved to: {public_dir}")
         else:
             # Save the full model
             self.public_agent.save_pretrained(public_dir)
-            print(f"Full model saved to: {public_dir}")
+            if self.verbose:
+                print(f"Full model saved to: {public_dir}")
         
         if self.tokenizer:
             self.tokenizer.save_pretrained(public_dir)
@@ -975,6 +1146,7 @@ def main():
     dataset_name = config.get("dataset.name")
     dataset_type = config.get("dataset.type")
     output_base_dir = config.get("output.base_dir")
+    output_verbose = config.get("output.verbose", False)
     
     # Infer dataset type if not specified
     if dataset_type is None:
@@ -1004,14 +1176,16 @@ def main():
     try:
         train_dataset = load_dataset(dataset_name, split=train_split)
         eval_dataset = load_dataset(dataset_name, split=eval_split)
-        print(f"Train dataset size: {len(train_dataset)}")
-        print(f"Eval dataset size: {len(eval_dataset)}")
+        if output_verbose:
+            print(f"Train dataset size: {len(train_dataset)}")
+            print(f"Eval dataset size: {len(eval_dataset)}")
     except Exception as e:
         print(f"Error loading dataset: {e}")
         return
     
     # Load tokenizer
-    print(f"\nLoading tokenizer from {public_model_name}...")
+    if output_verbose:
+        print(f"\nLoading tokenizer from {public_model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(
         public_model_name, **model_config.tokenizer_kwargs
     )
@@ -1025,14 +1199,17 @@ def main():
     use_flash_attn = config.get("model.use_flash_attention_2", True)
     if use_flash_attn:
         model_kwargs["attn_implementation"] = "flash_attention_2"
-        print("Flash Attention 2 enabled")
+        if output_verbose:
+            print("Flash Attention 2 enabled")
     
-    print(f"\nLoading public agent from {public_model_name}...")
+    if output_verbose:
+        print(f"\nLoading public agent from {public_model_name}...")
     public_agent = AutoModelForCausalLM.from_pretrained(
         public_model_name, **model_kwargs
     )
     
-    print(f"\nLoading worker agents from {worker_model_name}...")
+    if output_verbose:
+        print(f"\nLoading worker agents from {worker_model_name}...")
     worker_agents = [
         AutoModelForCausalLM.from_pretrained(
             worker_model_name, **model_kwargs
@@ -1081,6 +1258,11 @@ def main():
     max_new_tokens_prescription = trainer_config.get("max_new_tokens_prescription", 512)
     max_new_tokens_code = trainer_config.get("max_new_tokens_code", 256)
     
+    # Get rollout buffer size for gradient accumulation
+    rollout_buffer_size = trainer_config.get("rollout_buffer_size", 4)
+    if output_verbose:
+        print(f"Rollout buffer size: {rollout_buffer_size}")
+    
     # LoRA configuration for public agent
     use_lora = trainer_config.get("use_lora", False)
     lora_config = None
@@ -1093,7 +1275,15 @@ def main():
             "target_modules": lora_section.get("target_modules", ["q_proj", "v_proj", "k_proj", "o_proj"]),
             "bias": lora_section.get("bias", "none"),
         }
-        print(f"LoRA enabled with config: r={lora_config['r']}, alpha={lora_config['lora_alpha']}")
+        if output_verbose:
+            print(f"LoRA enabled with config: r={lora_config['r']}, alpha={lora_config['lora_alpha']}")
+    
+    # Propagate verbosity to reward/external modules
+    try:
+        import rewards.code_rewards as code_rewards_module
+        code_rewards_module.VERBOSE = bool(output_verbose)
+    except Exception:
+        pass
     
     # Create trainer
     trainer = PrescriptionGRPOTrainer(
@@ -1111,6 +1301,8 @@ def main():
         max_new_tokens_code=max_new_tokens_code,
         use_lora=use_lora,
         lora_config=lora_config,
+        rollout_buffer_size=rollout_buffer_size,
+        verbose=output_verbose,
     )
     
     # Train
@@ -1120,7 +1312,8 @@ def main():
     if config.get("output.save_final_model", False):
         save_path = config.get("output.save_path", os.path.join(output_dir, "final_model"))
         trainer.save_model(save_path)
-        print(f"Model saved to: {save_path}")
+        if output_verbose:
+            print(f"Model saved to: {save_path}")
 
 
 if __name__ == "__main__":
