@@ -29,7 +29,7 @@ dataset:
 output:
   base_dir: "/home/work/aipr-jhna/output"
   save_final_model: false
-  verbose: false
+  verbose: false  # Set to false for faster training
 
 # prescription_magrpo - training config for prescription-based GRPO
 # Note: Only Public Agent is trained, workers are frozen

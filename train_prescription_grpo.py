@@ -495,7 +495,7 @@ class PrescriptionGRPOTrainer:
         do_sample: bool = True,
     ) -> List[List[str]]:
         """
-        Generate completions from an agent given prompts.
+        Generate completions from an agent given prompts using batch processing.
         
         Args:
             agent: The model to generate from
@@ -517,6 +517,10 @@ class PrescriptionGRPOTrainer:
         original_requires_grad = {
             name: param.requires_grad for name, param in agent.named_parameters()
         }
+        original_padding_side = self.tokenizer.padding_side
+        
+        # Set left padding for batch generation (required for decoder-only models)
+        self.tokenizer.padding_side = "left"
         
         # Disable gradients for generation
         for param in agent.parameters():
@@ -526,49 +530,59 @@ class PrescriptionGRPOTrainer:
         all_completions = []
         
         try:
-            for prompt in prompts:
-                encodings = self.tokenizer(
-                    prompt,
-                    padding=True,
-                    truncation=True,
-                    return_tensors="pt"
-                ).to(device)
-                
-                generation_kwargs = {
-                    "input_ids": encodings.input_ids,
-                    "attention_mask": encodings.attention_mask,
-                    "max_new_tokens": max_new_tokens,
-                    "pad_token_id": self.tokenizer.pad_token_id,
-                    "num_return_sequences": num_return_sequences,
-                }
-                
-                if do_sample and num_return_sequences > 1:
-                    generation_kwargs.update({
-                        "do_sample": True,
-                        "temperature": self.args.temperature,
-                        "top_p": self.args.top_p,
-                        "num_beams": 1,
-                    })
-                    if self.args.top_k:
-                        generation_kwargs["top_k"] = self.args.top_k
-                elif do_sample:
-                    generation_kwargs.update({
-                        "do_sample": True,
-                        "temperature": self.args.temperature,
-                        "top_p": self.args.top_p,
-                    })
-                
-                outputs = agent.generate(**generation_kwargs)
-                
-                prompt_len = encodings.input_ids.shape[1]
+            # Batch encode all prompts at once (with left padding)
+            encodings = self.tokenizer(
+                prompts,
+                padding=True,
+                truncation=True,
+                return_tensors="pt"
+            ).to(device)
+            
+            generation_kwargs = {
+                "input_ids": encodings.input_ids,
+                "attention_mask": encodings.attention_mask,
+                "max_new_tokens": max_new_tokens,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "num_return_sequences": num_return_sequences,
+            }
+            
+            if do_sample and num_return_sequences > 1:
+                generation_kwargs.update({
+                    "do_sample": True,
+                    "temperature": self.args.temperature,
+                    "top_p": self.args.top_p,
+                    "num_beams": 1,
+                })
+                if self.args.top_k:
+                    generation_kwargs["top_k"] = self.args.top_k
+            elif do_sample:
+                generation_kwargs.update({
+                    "do_sample": True,
+                    "temperature": self.args.temperature,
+                    "top_p": self.args.top_p,
+                })
+            
+            # Generate all at once
+            outputs = agent.generate(**generation_kwargs)
+            
+            # Parse outputs: outputs shape is (batch_size * num_return_sequences, seq_len)
+            batch_size = len(prompts)
+            # With left padding, use input sequence length (including padding) to find where generation starts
+            input_seq_len = encodings.input_ids.shape[1]
+            
+            for i in range(batch_size):
                 completions = []
-                for seq in outputs:
-                    completion_tokens = seq[prompt_len:]
+                # Get the sequences for this prompt
+                start_idx = i * num_return_sequences
+                end_idx = start_idx + num_return_sequences
+                for seq_idx in range(start_idx, end_idx):
+                    seq = outputs[seq_idx]
+                    # Decode only the generated part (after the padded input)
+                    completion_tokens = seq[input_seq_len:]
                     completion_text = self.tokenizer.decode(
                         completion_tokens, skip_special_tokens=True
                     )
                     completions.append(completion_text)
-                
                 all_completions.append(completions)
         
         finally:
@@ -577,6 +591,7 @@ class PrescriptionGRPOTrainer:
             for name, param in agent.named_parameters():
                 if name in original_requires_grad:
                     param.requires_grad = original_requires_grad[name]
+            self.tokenizer.padding_side = original_padding_side
         
         return all_completions
     
@@ -731,34 +746,38 @@ class PrescriptionGRPOTrainer:
             do_sample=True,
         )[0]  # [0] because single prompt
         
-        # Step 2 & 3: Parse prescriptions and generate code from workers
-        aux_completions = []
-        main_completions = []
+        # Step 2: Parse all prescriptions first
+        parsed_prescriptions = [parse_prescription(p) for p in prescriptions]
         
-        for prescription in prescriptions:
-            aux_presc, main_presc = parse_prescription(prescription)
-            
-            # Worker 1: Generate aux code
-            aux_prompt = worker_aux_formatter(batch_item, aux_presc)
-            aux_code = self._generate_from_agent(
+        # Step 3: Batch generate aux code from Worker 1
+        aux_prompts = [
+            worker_aux_formatter(batch_item, aux_presc)
+            for aux_presc, _ in parsed_prescriptions
+        ]
+        aux_completions = [
+            codes[0] for codes in self._generate_from_agent(
                 self.worker_agents[0],
-                [aux_prompt],
+                aux_prompts,
                 num_return_sequences=1,
-                max_new_tokens=self.max_new_tokens_code,  # Code: shorter
-                do_sample=False,  # Deterministic for workers
-            )[0][0]
-            aux_completions.append(aux_code)
-            
-            # Worker 2: Generate main code (with aux_presc so it knows how to use aux)
-            main_prompt = worker_main_formatter(batch_item, main_presc, aux_presc)
-            main_code = self._generate_from_agent(
-                self.worker_agents[1],
-                [main_prompt],
-                num_return_sequences=1,
-                max_new_tokens=self.max_new_tokens_code,  # Code: shorter
+                max_new_tokens=self.max_new_tokens_code,
                 do_sample=False,
-            )[0][0]
-            main_completions.append(main_code)
+            )
+        ]
+        
+        # Step 4: Batch generate main code from Worker 2
+        main_prompts = [
+            worker_main_formatter(batch_item, main_presc, aux_presc)
+            for aux_presc, main_presc in parsed_prescriptions
+        ]
+        main_completions = [
+            codes[0] for codes in self._generate_from_agent(
+                self.worker_agents[1],
+                main_prompts,
+                num_return_sequences=1,
+                max_new_tokens=self.max_new_tokens_code,
+                do_sample=False,
+            )
+        ]
         
         # Step 4: Compute rewards
         rewards = self._compute_rewards(aux_completions, main_completions, batch_item)
@@ -903,16 +922,9 @@ class PrescriptionGRPOTrainer:
                 wandb.log(epoch_log, step=self.env_step)
     
     def evaluate(self, num_samples: int = 4) -> Dict[str, float]:
-        """Evaluate the current model with detailed metrics from code_reward_logger."""
+        """Evaluate the current model with detailed metrics from code_reward_logger using batch processing."""
         if self.eval_dataset is None:
             return {}
-        
-        # Collect all completions and batch items for batch logging
-        all_aux_codes = []
-        all_main_codes = []
-        all_test_cases = []
-        all_entry_points = []
-        all_prompts = []
         
         dataloader = DataLoader(
             self.eval_dataset,
@@ -921,60 +933,70 @@ class PrescriptionGRPOTrainer:
             collate_fn=lambda x: x,
         )
         
+        # Step 1: Collect all batch items and public prompts
+        batch_items = []
+        public_prompts = []
+        
+        for eval_idx, batch in enumerate(dataloader):
+            if eval_idx >= num_samples:
+                break
+            batch_item = batch[0]
+            batch_items.append(batch_item)
+            public_prompts.append(public_agent_formatter(batch_item))
+        
+        if not batch_items:
+            return {}
+        
         with torch.no_grad():
-            for eval_idx, batch in enumerate(dataloader):
-                if eval_idx >= num_samples:
-                    break
+            # Step 2: Batch generate prescriptions from Public Agent
+            all_prescriptions = self._generate_from_agent(
+                self.public_agent,
+                public_prompts,
+                num_return_sequences=1,
+                max_new_tokens=self.max_new_tokens_prescription,
+                do_sample=False,
+            )
+            
+            # Step 3: Parse prescriptions and prepare worker prompts
+            aux_prompts = []
+            main_prompts = []
+            parsed_data = []  # (batch_item, aux_presc, main_presc)
+            
+            for i, (batch_item, prescriptions) in enumerate(zip(batch_items, all_prescriptions)):
+                if prescriptions:
+                    prescription = prescriptions[0]
+                    aux_presc, main_presc = parse_prescription(prescription)
+                else:
+                    aux_presc, main_presc = None, None
                 
-                batch_item = batch[0]
-                
-                # Generate single prescription (greedy)
-                public_prompt = public_agent_formatter(batch_item)
-                prescriptions = self._generate_from_agent(
-                    self.public_agent,
-                    [public_prompt],
-                    num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_prescription,
-                    do_sample=False,
-                )[0]
-                
-                if not prescriptions:
-                    # Add empty completions to maintain alignment
-                    all_aux_codes.append("")
-                    all_main_codes.append("")
-                    all_test_cases.append(batch_item.get("test", ""))
-                    all_entry_points.append(batch_item.get("entry_point", ""))
-                    all_prompts.append(batch_item.get("prompt", ""))
-                    continue
-                
-                prescription = prescriptions[0]
-                aux_presc, main_presc = parse_prescription(prescription)
-                
-                # Generate code from workers
-                aux_prompt = worker_aux_formatter(batch_item, aux_presc)
-                aux_code = self._generate_from_agent(
-                    self.worker_agents[0],
-                    [aux_prompt],
-                    num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_code,
-                    do_sample=False,
-                )[0][0]
-                
-                main_prompt = worker_main_formatter(batch_item, main_presc, aux_presc)
-                main_code = self._generate_from_agent(
-                    self.worker_agents[1],
-                    [main_prompt],
-                    num_return_sequences=1,
-                    max_new_tokens=self.max_new_tokens_code,
-                    do_sample=False,
-                )[0][0]
-                
-                # Collect for batch logging
-                all_aux_codes.append(aux_code)
-                all_main_codes.append(main_code)
-                all_test_cases.append(batch_item.get("test", ""))
-                all_entry_points.append(batch_item.get("entry_point", ""))
-                all_prompts.append(batch_item.get("prompt", ""))
+                parsed_data.append((batch_item, aux_presc, main_presc))
+                aux_prompts.append(worker_aux_formatter(batch_item, aux_presc))
+                main_prompts.append(worker_main_formatter(batch_item, main_presc, aux_presc))
+            
+            # Step 4: Batch generate aux codes from Worker 1
+            all_aux_results = self._generate_from_agent(
+                self.worker_agents[0],
+                aux_prompts,
+                num_return_sequences=1,
+                max_new_tokens=self.max_new_tokens_code,
+                do_sample=False,
+            )
+            all_aux_codes = [codes[0] if codes else "" for codes in all_aux_results]
+            
+            # Step 5: Batch generate main codes from Worker 2
+            all_main_results = self._generate_from_agent(
+                self.worker_agents[1],
+                main_prompts,
+                num_return_sequences=1,
+                max_new_tokens=self.max_new_tokens_code,
+                do_sample=False,
+            )
+            all_main_codes = [codes[0] if codes else "" for codes in all_main_results]
+        
+        # Collect metadata for logging
+        all_test_cases = [item.get("test", "") for item in batch_items]
+        all_entry_points = [item.get("entry_point", "") for item in batch_items]
+        all_prompts = [item.get("prompt", "") for item in batch_items]
         
         # Get detailed metrics using code_reward_logger
         total_evaluated = len(all_aux_codes)
