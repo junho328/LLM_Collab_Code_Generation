@@ -1,6 +1,6 @@
 # model
 model:
-  name: "Qwen/Qwen2.5-Coder-3B"
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
   type: "qwen"
   temperature: 0.7
   top_p: 0.9
@@ -14,7 +14,7 @@ model:
 
 # dataset
 dataset:
-  name: "openai/openai_humaneval"
+  name: "/home/work/aipr-jhna/huggingface_hub/openai_humaneval"
   type: "humaneval"
   train_split: "test[33:163]"
   eval_split: "test[:32]"
@@ -23,7 +23,7 @@ seed: 42
 
 # output
 output:
-  base_dir: "output"
+  base_dir: "/home/work/aipr-jhna/output"
   save_final_model: false
   verbose: false
 
@@ -34,24 +34,24 @@ external:
 
 # magrpo
 magrpo:
-  num_turns: 2
-  num_train_epochs: 6
+  num_turns: 1
+  num_train_epochs: 4
   per_device_train_batch_size: 1
-  rollout_buffer_size: 2
+  rollout_buffer_size: 4
   learning_rate: 2.0e-5
   eval_interval: 4
-  eval_num_samples: 4
+  eval_num_samples: 32
   num_generations: 4
   max_new_tokens: 256
-  temperature: 0.6
-  top_p: 0.6
+  temperature: 0.7
+  top_p: 0.9
   top_k: null
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
   termination_threshold: -0.2
 
-  logging_steps: 50
+  logging_steps: 5
   save_steps: 200
 
 reward_processor:
@@ -60,8 +60,8 @@ reward_processor:
   shift: -4
 # wandb
 wandb:
-  project: "comlrl"
-  entity: "OpenMLRL"
-  name: "magrpo_humaneval"
+  project: "HumanEval"
+  entity: "contrl"
+  name: "magrpo_humaneval_qwen2.5-coder-3b-shift-4"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]

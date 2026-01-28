@@ -530,12 +530,23 @@ def main():
         external_mod.VERBOSE = bool(output_verbose)
     except Exception:
         pass
+    
+    model_load_kwargs = dict(model_config.model_kwargs)
+    if "attn_implementation" not in model_load_kwargs:
+        model_load_kwargs["attn_implementation"] = "flash_attention_2"
 
     # Use num_agents from magrpo config (where it belongs for MAGRPO training)
+    # agents = [
+    #     AutoModelForCausalLM.from_pretrained(
+    #         model_name,
+    #         **model_config.model_kwargs,
+    #     )
+    #     for _ in range(num_agents)
+    # ]
     agents = [
         AutoModelForCausalLM.from_pretrained(
             model_name,
-            **model_config.model_kwargs,
+            **model_load_kwargs,
         )
         for _ in range(num_agents)
     ]
