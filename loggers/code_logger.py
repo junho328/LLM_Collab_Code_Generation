@@ -58,6 +58,7 @@ def code_reward_logger(
             "passed_tests": 0,
             "total_tests": 0,
             "passed_rate": 0.0,
+            "fully_passed": False,  # True if all tests passed for this sample
             "timeout_num": 0,
             "bonus_reward": 0.0,
             "aux_usage_bonus": 0.0,
@@ -181,6 +182,8 @@ def code_reward_logger(
             if metrics["total_tests"] > 0:
                 metrics["passed_rate"] = passed_tests / metrics["total_tests"]
                 metrics["test_reward"] = metrics["passed_rate"] * 1.0
+                # Track if all tests passed for this sample
+                metrics["fully_passed"] = (passed_tests == metrics["total_tests"])
 
         except Exception:
             # Code loading failed

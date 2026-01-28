@@ -137,6 +137,7 @@ def aggregate_mt_humaneval_metrics_for_logging(
             "passed_tests",
             "total_tests",
             "passed_rate",
+            "fully_passed",
             "timeout_num",
             "bonus_reward",
             "aux_usage_bonus",
@@ -150,6 +151,14 @@ def aggregate_mt_humaneval_metrics_for_logging(
             values = [sample[key] for sample in metrics_list if key in sample]
             if values:
                 aggregated[f"{turn_prefix}/avg_{metric}"] = np.mean(values)
+
+        # Calculate fully_passed_count and fully_passed_rate for this turn
+        fully_passed_key = f"{turn_prefix}/fully_passed"
+        fully_passed_values = [sample.get(fully_passed_key, False) for sample in metrics_list]
+        fully_passed_count = sum(1 for v in fully_passed_values if v)
+        total_samples = len(metrics_list)
+        aggregated[f"{turn_prefix}/fully_passed_count"] = fully_passed_count
+        aggregated[f"{turn_prefix}/fully_passed_rate"] = fully_passed_count / total_samples if total_samples > 0 else 0.0
 
         # No improvement metrics
 
