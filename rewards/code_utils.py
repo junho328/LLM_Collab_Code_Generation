@@ -231,15 +231,54 @@ def check_syntax(code, description):
 
 
 def concatenate_functions(aux_completion, main_completion, imports=""):
-    """Concatenate imports, aux and main functions."""
+    """Concatenate imports, aux and main functions.
+    
+    Automatically detects and adds missing typing imports based on type hints used in code.
+    """
     aux_clean = cleanup_code(aux_completion)
     main_clean = cleanup_code(main_completion)
-
-    # Build the combined code with imports first
-    parts = []
-
+    
+    # Combine code to check for type hints
+    combined_raw = (aux_clean or "") + "\n" + (main_clean or "")
+    
+    # Detect typing module types used in code
+    typing_types = ["List", "Dict", "Tuple", "Set", "Optional", "Union", "Any", "Callable"]
+    used_types = []
+    for t in typing_types:
+        # Check for type usage patterns: -> Type, : Type, [Type]
+        if re.search(rf'\b{t}\b', combined_raw):
+            used_types.append(t)
+    
+    # Build imports
+    import_lines = []
     if imports:
-        parts.append(imports)
+        import_lines.append(imports)
+    
+    # Add missing typing imports
+    if used_types:
+        existing_imports = imports or ""
+        missing_types = [t for t in used_types if t not in existing_imports]
+        if missing_types:
+            # Check if there's already a "from typing import" line
+            if "from typing import" in existing_imports:
+                # Need to extend existing import - for simplicity, add new line
+                import_lines.append(f"from typing import {', '.join(missing_types)}")
+            else:
+                import_lines.append(f"from typing import {', '.join(missing_types)}")
+    
+    # Remove duplicate import lines
+    seen = set()
+    unique_imports = []
+    for line in import_lines:
+        if line not in seen:
+            seen.add(line)
+            unique_imports.append(line)
+    
+    # Build the combined code
+    parts = []
+    
+    if unique_imports:
+        parts.append("\n".join(unique_imports))
 
     if aux_clean:
         parts.append(aux_clean)
@@ -252,7 +291,11 @@ def concatenate_functions(aux_completion, main_completion, imports=""):
 
 
 def extract_test_cases(test_code, entry_point):
-    """Extract individual test cases from the test code and replace candidate with entry_point."""
+    """Extract individual test cases from the test code and replace candidate with entry_point.
+    
+    Handles multi-line assert statements (e.g., assert func() == [...]) by tracking
+    bracket balance to capture complete statements.
+    """
     if not test_code or not entry_point:
         return []
 
@@ -264,46 +307,50 @@ def extract_test_cases(test_code, entry_point):
         return []
 
     check_body = check_match.group(1)
-
-    # Find all assert statements - using a more general approach
-    # Pattern 1: Direct candidate calls with ==
-    direct_equality_pattern = r"assert\s+candidate\([^)]*\)\s*==\s*[^\n]+"
-
-    # Pattern 2: Simple abs difference pattern
-    simple_abs_pattern = r"assert\s+abs\(candidate\([^)]*\)\s*-\s*[^)]+\)\s*<\s*[^\n]+"
-
-    # Pattern 3: Math.fabs or other function calls containing candidate
-    math_fabs_pattern = r"assert\s+math\.fabs\([^)]*candidate[^)]*\)\s*<\s*[^\n]+"
-
-    # Pattern 4: General assert statements that contain "candidate" - catch-all
-    general_candidate_pattern = r"assert\s+[^\n]*candidate[^\n]*"
-
-    # Try patterns in order of specificity (most specific first)
-    patterns = [
-        direct_equality_pattern,
-        simple_abs_pattern,
-        math_fabs_pattern,
-        general_candidate_pattern,
-    ]
-
+    
+    # Extract complete assert statements (handling multi-line)
     all_matches = []
-    check_lines = check_body.strip().split("\n")
-
-    # Process each line to find assert statements
-    for line in check_lines:
-        line = line.strip()
-        if line.startswith("assert") and "candidate" in line:
-            # Check if this line matches any of our specific patterns
-            matched = False
-            for pattern in patterns[:-1]:  # Don't use general pattern in this loop
-                if re.match(pattern, line):
-                    all_matches.append(line)
-                    matched = True
-                    break
-
-            # If no specific pattern matched, use the general pattern as fallback
-            if not matched and re.match(general_candidate_pattern, line):
-                all_matches.append(line)
+    lines = check_body.split("\n")
+    
+    current_assert = None
+    bracket_count = 0  # Track [], (), {}
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Start of new assert statement
+        if stripped.startswith("assert") and "candidate" in stripped:
+            current_assert = stripped
+            # Count brackets in this line
+            bracket_count = (
+                stripped.count("[") - stripped.count("]") +
+                stripped.count("(") - stripped.count(")") +
+                stripped.count("{") - stripped.count("}")
+            )
+            
+            # If balanced, this is a complete single-line assert
+            if bracket_count == 0:
+                all_matches.append(current_assert)
+                current_assert = None
+        
+        # Continuation of multi-line assert
+        elif current_assert is not None:
+            current_assert += " " + stripped
+            bracket_count += (
+                stripped.count("[") - stripped.count("]") +
+                stripped.count("(") - stripped.count(")") +
+                stripped.count("{") - stripped.count("}")
+            )
+            
+            # Check if statement is now complete
+            if bracket_count <= 0:
+                all_matches.append(current_assert)
+                current_assert = None
+                bracket_count = 0
+    
+    # Handle case where last assert wasn't closed (shouldn't happen normally)
+    if current_assert is not None:
+        all_matches.append(current_assert)
 
     # Remove duplicates while preserving order
     seen = set()

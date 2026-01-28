@@ -1,0 +1,75 @@
+# Prescription-based GRPO Config
+# Public Agent is trained, Worker Agents are frozen
+
+# model - Public Agent (trained)
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  type: "qwen"
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 2048
+  # Worker model (frozen) - can be same or different from public agent
+  worker_model: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  # Flash Attention 2 for faster training/inference (requires flash-attn package)
+  use_flash_attention_2: true
+  tokenizer_kwargs:
+    trust_remote_code: true
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: "bfloat16"
+
+# dataset
+dataset:
+  name: "/home/work/aipr-jhna/huggingface_hub/openai_humaneval"
+  type: "humaneval"
+  train_split: "test[33:163]"
+  eval_split: "test[:32]"
+
+# output
+output:
+  base_dir: "/home/work/aipr-jhna/output"
+  save_final_model: false
+  verbose: false
+
+# prescription_magrpo - training config for prescription-based GRPO
+# Note: Only Public Agent is trained, workers are frozen
+prescription_magrpo:
+  num_train_epochs: 4
+  per_device_train_batch_size: 1
+  learning_rate: 2.0e-5
+  logging_steps: 5
+  save_steps: 200
+  eval_interval: 4
+  eval_num_samples: 32
+  # Number of prescriptions to generate per problem (GRPO samples)
+  num_generations: 8
+  # Max tokens for prescription generation (Public Agent - longer text)
+  max_new_tokens_prescription: 512
+  # Max tokens for code generation (Worker Agents - shorter code)
+  max_new_tokens_code: 256
+  temperature: 0.7
+  top_p: 0.9
+  top_k: null
+  
+  # LoRA configuration for Public Agent (set use_lora: true to enable)
+  use_lora: true
+  lora:
+    r: 32                # LoRA rank
+    lora_alpha: 32       # LoRA alpha (scaling factor)
+    lora_dropout: 0.0   # Dropout for LoRA layers
+    target_modules: all-linear     # Modules to apply LoRA
+    bias: "none"         # Bias type: "none", "all", or "lora_only"
+
+# reward_processor (optional)
+reward_processor:
+  enabled: false
+  scale_factor: 1.0
+  shift: -4.0
+
+# wandb
+wandb:
+  project: "HumanEval"
+  entity: "contrl"
+  name: "pubmdp_humaneval_qwen2.5-coder-3b-shift-4"
+  dir: "output"
+  tags: ["prescription-grpo", "humaneval", "public-agent"]
