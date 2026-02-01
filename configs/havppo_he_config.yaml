@@ -1,3 +1,7 @@
+# HAVPPO Configuration for HumanEval
+# HAVPPO: Heterogeneous-Agent Value-based PPO
+# Combines HAPPO's sequential update with centralized value network for advantage estimation
+
 # model
 model:
   name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
@@ -12,7 +16,7 @@ model:
     torch_dtype: "bfloat16"
   special_tokens: {}
 
-# LoRA PEFT configuration
+# LoRA PEFT configuration (for policy models)
 lora:
   enabled: true
   r: 32  # rank of the update matrices
@@ -42,13 +46,14 @@ external:
   mode: "level_feedback"
   sandbox_slice: 1
 
-# magrpo
-magrpo:
+# HAVPPO configuration
+havppo:
+  # Training parameters
   num_turns: 1
   num_train_epochs: 4
   per_device_train_batch_size: 1
   rollout_buffer_size: 16
-  learning_rate: 2.0e-5
+  learning_rate: 2.0e-5  # Policy (LoRA) learning rate
   eval_interval: 4
   eval_num_samples: 32
   num_generations: 4
@@ -59,7 +64,21 @@ magrpo:
   joint_mode: aligned
   num_agents: 2
   discount: 0.9
-  termination_threshold: -0.2
+  # termination_threshold: -0.2
+  
+  # HAPPO-specific parameters (sequential update with M factor)
+  ppo_clip_eps: 0.2
+  m_clip_min: 0.1
+  m_clip_max: 1.0
+  shuffle_agent_order: false
+  reverse_agent_order: false  # true: Main -> Helper, false: Helper -> Main
+  use_ppo_clip: false  # true: use PPO-clip objective, false: use simple policy gradient (MAGRPO-style), M factor still applied
+  
+  # HAVPPO-specific: Centralized Value Network parameters
+  value_head_hidden_dim: 256  # Hidden dimension for 2-layer MLP value head
+  value_learning_rate: 1.0e-5  # Learning rate for value head
+  value_loss_coef: 0.2  # Coefficient for value loss
+  advantage_normalization: true  # Whether to normalize advantages
 
   logging_steps: 5
   save_steps: 200
@@ -68,10 +87,11 @@ reward_processor:
   enabled: true
   scale_factor: 1.0
   shift: -4
+
 # wandb
 wandb:
   project: "HumanEval"
   entity: "contrl"
-  name: "magrpo_humaneval_qwen2.5-coder-1.5b-shift-4"
+  name: "havppo_he_qwen2.5-coder-1.5b-shift-4-eps0.0-mclip1.0"
   dir: "output"
-  tags: ["magrpo", "humaneval", "multi-agent"]
+  tags: ["havppo", "humaneval", "multi-agent", "value-based"]

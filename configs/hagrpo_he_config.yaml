@@ -12,6 +12,16 @@ model:
     torch_dtype: "bfloat16"
   special_tokens: {}
 
+# LoRA PEFT configuration
+lora:
+  enabled: true
+  r: 32  # rank of the update matrices
+  lora_alpha: 32  # scaling factor
+  lora_dropout: 0.0
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
 # dataset
 dataset:
   name: "/home/work/aipr-jhna/huggingface_hub/openai_humaneval"
@@ -53,7 +63,7 @@ hagrpo:
   
   ppo_clip_eps: 0.1
   m_clip_min: 0.1
-  m_clip_max: 2.0
+  m_clip_max: 0.5
   shuffle_agent_order: false
   reverse_agent_order: false  # true: Main -> Helper, false: Helper -> Main
   use_ppo_clip: false  # false: use simple policy gradient (MAGRPO-style), M factor still applied
@@ -64,11 +74,11 @@ hagrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -2
+  shift: -6
 # wandb
 wandb:
   project: "HumanEval"
   entity: "contrl"
-  name: "hagrpo_he_qwen2.5-coder-1.5b-shift-2-eps-0.0"
+  name: "hagrpo_he_qwen2.5-coder-1.5b-shift-6-eps-0.0-mclip0.5"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]

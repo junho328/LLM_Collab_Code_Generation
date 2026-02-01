@@ -1,15 +1,17 @@
 """
-Training script for HAGRPO (Heterogeneous-Agent Group Relative Policy Optimization).
+Training script for HAVPPO (Heterogeneous-Agent Value-based Proximal Policy Optimization).
 
-HAGRPO combines:
+HAVPPO combines:
 - HAPPO's sequential update scheme with importance ratio accumulation
-- GRPO's group-relative advantage estimation (no Value network)
+- PPO clip objective for policy optimization
+- Centralized value network for advantage estimation (CTDE)
 
 Key features:
 1. Sequential agent updates (not simultaneous like MAGRPO)
 2. M factor accumulates importance ratios across agents
 3. PPO-clip objective with M factor
-4. Group reward normalization for advantage estimation
+4. Value-based advantage estimation using centralized value network
+5. Policy models use LoRA adapters, value network uses 2-layer MLP value head
 """
 
 import argparse
@@ -35,7 +37,8 @@ from loggers.mt_code_logger import (
 
 from rewards.code_rewards import execution_reward_aux
 from comlrl.utils.reward_processor import RewardProcessors
-from comlrl.trainers.hagrpo import HAGRPOConfig, HAGRPOTrainer
+from comlrl.trainers.havppo import HAVPPOConfig, HAVPPOTrainer
+from comlrl.models.actor_critic import CausalLMWithValueHead
 import external as external_ctx
 from external import get_external_transition
 
@@ -182,9 +185,9 @@ def get_reward_function(dataset_type: str, num_agents: int):
 
 
 def main():
-    """Main function to run the HAGRPO training."""
+    """Main function to run the HAVPPO training."""
     parser = argparse.ArgumentParser(
-        description="Train HAGRPO with configurable dataset (single-turn or multi-turn)"
+        description="Train HAVPPO with configurable dataset (single-turn or multi-turn)"
     )
     add_config_args(parser)
 
@@ -230,20 +233,15 @@ def main():
     eval_split = config.get("dataset.eval_split")
 
     # ------------------------------------------------------------------
-    # Config: HAGRPO training params
+    # Config: HAVPPO training params
     # ------------------------------------------------------------------
-    hagrpo_config = (
-        config.get_section("hagrpo") if hasattr(config, "get_section") else {}
+    havppo_config = (
+        config.get_section("havppo") if hasattr(config, "get_section") else {}
     )
-    # Fall back to magrpo section if hagrpo not found (for compatibility)
-    if not hagrpo_config:
-        hagrpo_config = (
-            config.get_section("magrpo") if hasattr(config, "get_section") else {}
-        )
 
-    seed_value = int(config.get("seed", hagrpo_config.get("seed", 42)))
-    num_turns = hagrpo_config.get("num_turns", 2)
-    num_agents = hagrpo_config.get("num_agents", 2)
+    seed_value = int(config.get("seed", havppo_config.get("seed", 42)))
+    num_turns = havppo_config.get("num_turns", 2)
+    num_agents = havppo_config.get("num_agents", 2)
     is_multi_turn = num_turns > 1
     output_verbose = config.get("output.verbose", False)
 
@@ -252,14 +250,14 @@ def main():
             print(f"Multi-turn training enabled: num_turns={num_turns}")
         else:
             print(f"Single-turn training: num_turns={num_turns}")
-        print("Using HAGRPO algorithm with sequential agent updates")
+        print("Using HAVPPO algorithm with sequential agent updates and value-based advantage")
 
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "no_job_id")
 
     if is_multi_turn:
-        output_dir = os.path.join(output_base_dir, f"mt_hagrpo_job_{slurm_job_id}")
+        output_dir = os.path.join(output_base_dir, f"mt_havppo_job_{slurm_job_id}")
     else:
-        output_dir = os.path.join(output_base_dir, f"hagrpo_job_{slurm_job_id}")
+        output_dir = os.path.join(output_base_dir, f"havppo_job_{slurm_job_id}")
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -303,8 +301,8 @@ def main():
                 f"Special tokens added: {model_config.special_tokens.get('additional_special_tokens', [])}"
             )
 
-    temperature = hagrpo_config.get("temperature", 0.6)
-    top_p = hagrpo_config.get("top_p", 0.6)
+    temperature = havppo_config.get("temperature", 0.6)
+    top_p = havppo_config.get("top_p", 0.6)
 
     # ------------------------------------------------------------------
     # Config: External transitions
@@ -396,44 +394,49 @@ def main():
     external_ctx.set_context_resolver(_resolver)
 
     # ------------------------------------------------------------------
-    # Build training args with HAGRPO-specific parameters
+    # Build training args with HAVPPO-specific parameters
     # ------------------------------------------------------------------
-    hagrpo_args_kwargs = {
+    havppo_args_kwargs = {
         "output_dir": output_dir,
         "num_agents": num_agents,
-        "num_train_epochs": hagrpo_config.get("num_train_epochs", 20),
-        "per_device_train_batch_size": hagrpo_config.get(
+        "num_train_epochs": havppo_config.get("num_train_epochs", 20),
+        "per_device_train_batch_size": havppo_config.get(
             "per_device_train_batch_size", 1
         ),
-        "learning_rate": hagrpo_config.get("learning_rate", 5e-6),
-        "logging_steps": hagrpo_config.get("logging_steps", 50),
-        "save_steps": hagrpo_config.get("save_steps", 200),
-        "eval_interval": hagrpo_config.get("eval_interval", 16),
-        "eval_num_samples": hagrpo_config.get("eval_num_samples", 4),
-        "num_generations": hagrpo_config.get("num_generations", 4),
-        "max_new_tokens": hagrpo_config.get("max_new_tokens", 256),
+        "learning_rate": havppo_config.get("learning_rate", 5e-6),
+        "logging_steps": havppo_config.get("logging_steps", 50),
+        "save_steps": havppo_config.get("save_steps", 200),
+        "eval_interval": havppo_config.get("eval_interval", 16),
+        "eval_num_samples": havppo_config.get("eval_num_samples", 4),
+        "num_generations": havppo_config.get("num_generations", 4),
+        "max_new_tokens": havppo_config.get("max_new_tokens", 256),
         "temperature": temperature,
         "top_p": top_p,
         # Multi-turn parameters
         "num_turns": num_turns,
-        "discount": hagrpo_config.get("discount", 0.9),
-        "joint_mode": hagrpo_config.get("joint_mode", "aligned"),
-        "termination_threshold": hagrpo_config.get("termination_threshold", -0.2),
-        "rollout_buffer_size": hagrpo_config.get("rollout_buffer_size", 2),
+        "discount": havppo_config.get("discount", 0.9),
+        "joint_mode": havppo_config.get("joint_mode", "aligned"),
+        "termination_threshold": havppo_config.get("termination_threshold", -0.2),
+        "rollout_buffer_size": havppo_config.get("rollout_buffer_size", 2),
         "external_prompt_passthrough": True,
-        # HAGRPO-specific parameters
-        "ppo_clip_eps": hagrpo_config.get("ppo_clip_eps", 0.2),
-        "m_clip_min": hagrpo_config.get("m_clip_min", 0.1),
-        "m_clip_max": hagrpo_config.get("m_clip_max", 10.0),
-        "shuffle_agent_order": hagrpo_config.get("shuffle_agent_order", False),
-        "reverse_agent_order": hagrpo_config.get("reverse_agent_order", False),
-        "use_ppo_clip": hagrpo_config.get("use_ppo_clip", True),
+        # HAPPO-specific parameters
+        "ppo_clip_eps": havppo_config.get("ppo_clip_eps", 0.2),
+        "m_clip_min": havppo_config.get("m_clip_min", 0.1),
+        "m_clip_max": havppo_config.get("m_clip_max", 10.0),
+        "shuffle_agent_order": havppo_config.get("shuffle_agent_order", False),
+        "reverse_agent_order": havppo_config.get("reverse_agent_order", False),
+        "use_ppo_clip": havppo_config.get("use_ppo_clip", True),
+        # HAVPPO-specific: value network parameters
+        "value_head_hidden_dim": havppo_config.get("value_head_hidden_dim", 256),
+        "value_learning_rate": havppo_config.get("value_learning_rate", 1e-4),
+        "value_loss_coef": havppo_config.get("value_loss_coef", 0.5),
+        "advantage_normalization": havppo_config.get("advantage_normalization", True),
     }
 
-    if "top_k" in hagrpo_config:
-        hagrpo_args_kwargs["top_k"] = hagrpo_config.get("top_k")
+    if "top_k" in havppo_config:
+        havppo_args_kwargs["top_k"] = havppo_config.get("top_k")
 
-    hagrpo_args = HAGRPOConfig(**hagrpo_args_kwargs)
+    havppo_args = HAVPPOConfig(**havppo_args_kwargs)
 
     # ------------------------------------------------------------------
     # Formatters, rewards, and logging
@@ -452,12 +455,12 @@ def main():
     )
 
     if is_multi_turn:
-        wandb_name = wandb_section.get("name", f"mt_hagrpo_{dataset_type}")
+        wandb_name = wandb_section.get("name", f"mt_havppo_{dataset_type}")
     else:
-        wandb_name = wandb_section.get("name", f"hagrpo_{dataset_type}")
+        wandb_name = wandb_section.get("name", f"havppo_{dataset_type}")
 
     external_mode = external_cfg.get("mode", "level_feedback")
-    default_tags = ["hagrpo", dataset_type or "code", f"turns_{num_turns}"]
+    default_tags = ["havppo", dataset_type or "code", f"turns_{num_turns}"]
     tags_from_cfg = wandb_section.get("tags", default_tags)
     tags = list(tags_from_cfg) if isinstance(tags_from_cfg, list) else default_tags
 
@@ -480,7 +483,7 @@ def main():
             "model": model_section,
             "output": output_section,
             "external": external_cfg,
-            "trainer": hagrpo_config,
+            "trainer": havppo_config,
         },
     }
 
@@ -501,12 +504,12 @@ def main():
         model_load_kwargs["attn_implementation"] = "flash_attention_2"
 
     # ------------------------------------------------------------------
-    # LoRA PEFT configuration
+    # LoRA PEFT configuration (for policy models)
     # ------------------------------------------------------------------
     lora_config_section = (
         config.get_section("lora") if hasattr(config, "get_section") else {}
     )
-    use_lora = lora_config_section.get("enabled", False)
+    use_lora = lora_config_section.get("enabled", True)  # Default to True for HAVPPO
 
     if use_lora:
         # LoRA configuration
@@ -521,7 +524,7 @@ def main():
 
         if output_verbose:
             print("\n" + "=" * 60)
-            print("LoRA Configuration")
+            print("LoRA Configuration (Policy Models)")
             print("=" * 60)
             print(f"  Enabled: {use_lora}")
             print(f"  Rank (r): {lora_r}")
@@ -561,7 +564,7 @@ def main():
 
             agents.append(peft_model)
     else:
-        # Original full model training
+        # Full model training (not recommended for HAVPPO due to memory)
         agents = [
             AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -569,6 +572,40 @@ def main():
             )
             for _ in range(num_agents)
         ]
+
+    # ------------------------------------------------------------------
+    # Create value network (centralized critic)
+    # ------------------------------------------------------------------
+    if output_verbose:
+        print("\n" + "=" * 60)
+        print("Value Network Configuration")
+        print("=" * 60)
+        print(f"  Hidden Dim: {havppo_args.value_head_hidden_dim}")
+        print(f"  Learning Rate: {havppo_args.value_learning_rate}")
+        print(f"  Loss Coefficient: {havppo_args.value_loss_coef}")
+        print("  Base Model: Frozen (only value head trainable)")
+        print("=" * 60 + "\n")
+
+    # Load base model for value network (frozen)
+    value_base_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        **model_load_kwargs,
+    )
+
+    # Freeze all base model parameters
+    for param in value_base_model.parameters():
+        param.requires_grad = False
+
+    # Create value network with value head
+    value_network = CausalLMWithValueHead(
+        base_model=value_base_model,
+        attach_value_head=True,
+        value_head_hidden_dim=havppo_args.value_head_hidden_dim,
+    )
+
+    if output_verbose:
+        value_head_params = sum(p.numel() for p in value_network.value_head.parameters())
+        print(f"Value Head Trainable params: {value_head_params:,}")
 
     reward_processor = None
     if config.get("reward_processor.enabled", True):
@@ -604,9 +641,16 @@ def main():
         "eval_aggregator": eval_aggregator,
         "dataset_type": dataset_type,
         # Training args
-        "args": hagrpo_args,
+        "args": havppo_args,
         # LoRA configuration
         "use_lora": use_lora,
+        # Value network
+        "value_network": value_network,
+        # Model config
+        "model_config": {
+            "model_kwargs": model_load_kwargs,
+            "tokenizer_kwargs": model_config.tokenizer_kwargs,
+        },
     }
 
     if reward_processor is not None:
@@ -643,29 +687,26 @@ def main():
     # ------------------------------------------------------------------
     if output_verbose:
         print("\n" + "=" * 60)
-        print("HAGRPO Training Configuration")
+        print("HAVPPO Training Configuration")
         print("=" * 60)
-        print(f"Algorithm: HAGRPO (Sequential Agent Updates)")
+        print(f"Algorithm: HAVPPO (Sequential Agent Updates + Value-based Advantage)")
         print(f"Number of Agents: {num_agents}")
         print(f"Number of Turns: {num_turns}")
         # Agent update order
-        if hagrpo_args.shuffle_agent_order:
+        if havppo_args.shuffle_agent_order:
             order_desc = "Random (shuffled each batch)"
-        elif hagrpo_args.reverse_agent_order:
+        elif havppo_args.reverse_agent_order:
             order_desc = "Reverse (Main -> Helper)"
         else:
             order_desc = "Default (Helper -> Main)"
         print(f"Agent Update Order: {order_desc}")
-        # Loss function type
-        if hagrpo_args.use_ppo_clip:
-            loss_desc = f"PPO-Clip (eps={hagrpo_args.ppo_clip_eps})"
-        else:
-            loss_desc = "Policy Gradient (MAGRPO-style)"
-        print(f"Loss Function: {loss_desc}")
-        print(f"M Factor Clip Range: [{hagrpo_args.m_clip_min}, {hagrpo_args.m_clip_max}]")
+        print(f"Use PPO Clip: {havppo_args.use_ppo_clip}")
+        print(f"PPO Clip Epsilon: {havppo_args.ppo_clip_eps}")
+        print(f"M Factor Clip Range: [{havppo_args.m_clip_min}, {havppo_args.m_clip_max}]")
+        print(f"Advantage Normalization: {havppo_args.advantage_normalization}")
         print("=" * 60 + "\n")
 
-    trainer = HAGRPOTrainer(**trainer_kwargs)
+    trainer = HAVPPOTrainer(**trainer_kwargs)
     trainer.train()
 
     save_final = config.get("output.save_final_model", False)

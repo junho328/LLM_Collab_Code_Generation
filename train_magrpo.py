@@ -18,6 +18,7 @@ from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import LoraConfig, get_peft_model, TaskType
 
 # Single-turn code logger no longer used directly; multi-turn logger handles all cases
 from loggers.mt_code_logger import (
@@ -535,21 +536,75 @@ def main():
     if "attn_implementation" not in model_load_kwargs:
         model_load_kwargs["attn_implementation"] = "flash_attention_2"
 
-    # Use num_agents from magrpo config (where it belongs for MAGRPO training)
-    # agents = [
-    #     AutoModelForCausalLM.from_pretrained(
-    #         model_name,
-    #         **model_config.model_kwargs,
-    #     )
-    #     for _ in range(num_agents)
-    # ]
-    agents = [
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            **model_load_kwargs,
+    # ------------------------------------------------------------------
+    # LoRA PEFT configuration
+    # ------------------------------------------------------------------
+    lora_config_section = (
+        config.get_section("lora") if hasattr(config, "get_section") else {}
+    )
+    use_lora = lora_config_section.get("enabled", False)
+
+    if use_lora:
+        # LoRA configuration
+        lora_r = lora_config_section.get("r", 32)
+        lora_alpha = lora_config_section.get("lora_alpha", 32)
+        lora_dropout = lora_config_section.get("lora_dropout", 0.0)
+        lora_target_modules = lora_config_section.get(
+            "target_modules",
+            ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
         )
-        for _ in range(num_agents)
-    ]
+        lora_bias = lora_config_section.get("bias", "none")
+
+        if output_verbose:
+            print("\n" + "=" * 60)
+            print("LoRA Configuration")
+            print("=" * 60)
+            print(f"  Enabled: {use_lora}")
+            print(f"  Rank (r): {lora_r}")
+            print(f"  Alpha: {lora_alpha}")
+            print(f"  Dropout: {lora_dropout}")
+            print(f"  Target Modules: {lora_target_modules}")
+            print(f"  Bias: {lora_bias}")
+            print("=" * 60 + "\n")
+
+        # Create separate model instances with individual LoRA adapters for each agent
+        agents = []
+        for agent_idx in range(num_agents):
+            # Load fresh base model for each agent
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                **model_load_kwargs,
+            )
+
+            # Create LoRA config for this agent
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                target_modules=lora_target_modules,
+                bias=lora_bias,
+            )
+
+            # Wrap with PEFT - creates agent-specific adapter
+            peft_model = get_peft_model(base_model, peft_config)
+
+            if output_verbose:
+                trainable_params = sum(p.numel() for p in peft_model.parameters() if p.requires_grad)
+                total_params = sum(p.numel() for p in peft_model.parameters())
+                print(f"Agent {agent_idx}: Trainable params: {trainable_params:,} / {total_params:,} "
+                      f"({100 * trainable_params / total_params:.2f}%)")
+
+            agents.append(peft_model)
+    else:
+        # Original full model training
+        agents = [
+            AutoModelForCausalLM.from_pretrained(
+                model_name,
+                **model_load_kwargs,
+            )
+            for _ in range(num_agents)
+        ]
 
     reward_processor = None
     if config.get("reward_processor.enabled", True):
@@ -586,6 +641,8 @@ def main():
         "dataset_type": dataset_type,
         # Training args
         "args": magrpo_args,
+        # LoRA configuration
+        "use_lora": use_lora,
     }
 
     if reward_processor is not None:
