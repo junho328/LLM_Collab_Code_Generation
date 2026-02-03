@@ -98,6 +98,26 @@ def main_function_formatter(example: Dict[str, Any]) -> str:
 
     params_str = ", ".join(params)
 
+#     prompt_text = f"""Solve this coding problem by implementing the required function.
+
+# Problem:
+# {prompt}
+
+# You have access to a helper function: aux(...)
+
+# IMPORTANT INSTRUCTIONS:
+# - Output ONLY the function code, no explanations or examples
+# - Do NOT include markdown code blocks (```python)
+# - Do NOT include any text before or after the function
+# - Do NOT include test cases or example usage
+# - Do NOT redefine the aux() function
+# - Implement ONLY the '{entry_point}' function as specified
+# - You can call aux() to assign value to a variable within your function if helpful
+
+# Your output should follow this format:
+
+# def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+
     prompt_text = f"""Solve this coding problem by implementing the required function.
 
 Problem:
@@ -110,13 +130,13 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT include markdown code blocks (```python)
 - Do NOT include any text before or after the function
 - Do NOT include test cases or example usage
-- Do NOT redefine the aux() function
 - Implement ONLY the '{entry_point}' function as specified
-- You can call aux() to assign value to a variable within your function if helpful
+- You MUST call aux() to assign value to a variable within your function
+- Do NOT redefine the aux() function
 
 Your output should follow this format:
 
-def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+def {entry_point}({params_str}):\n # your function code with aux() call here\nreturn result\n"""
 
     return prompt_text
 
@@ -140,8 +160,20 @@ def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
     return None, None
 
 
-def get_reward_function(dataset_type: str, num_agents: int):
-    """Get a reward function compatible with variable number of agents."""
+def get_reward_function(
+    dataset_type: str,
+    num_agents: int,
+    enforce_collaboration: bool = True,
+    self_aux_penalty: float = 0.0,
+):
+    """Get a reward function compatible with variable number of agents.
+    
+    Args:
+        dataset_type: Type of dataset (humaneval, coophumaneval, mbpp)
+        num_agents: Number of agents in the collaboration
+        enforce_collaboration: If True, penalize main function defining its own aux
+        self_aux_penalty: Reward value when collaboration violation is detected
+    """
     if dataset_type is None:
         raise ValueError(
             "dataset.type not specified in config. Please add 'type: humaneval/coophumaneval' to the dataset section."
@@ -173,7 +205,13 @@ def get_reward_function(dataset_type: str, num_agents: int):
                 raise ValueError("batch_items must be provided for reward calculation")
 
             return execution_reward_aux(
-                completion1, completion2, test_cases, entry_points, original_prompts
+                completion1,
+                completion2,
+                test_cases,
+                entry_points,
+                original_prompts,
+                enforce_collaboration=enforce_collaboration,
+                self_aux_penalty_value=self_aux_penalty,
             )
 
         return reward_wrapper
@@ -439,7 +477,22 @@ def main():
     # Formatters, rewards, and logging
     # ------------------------------------------------------------------
     formatters = get_formatters(dataset_type, num_agents)
-    reward_func = get_reward_function(dataset_type, num_agents)
+
+    # Load collaboration enforcement settings from config
+    collaboration_cfg = (
+        config.get_section("collaboration") if hasattr(config, "get_section") else {}
+    )
+    enforce_collaboration = collaboration_cfg.get("enforce", True)
+    self_aux_penalty = collaboration_cfg.get("self_aux_penalty", 0.0)
+
+    print(f"[Collaboration] enforce={enforce_collaboration}, self_aux_penalty={self_aux_penalty}")
+
+    reward_func = get_reward_function(
+        dataset_type,
+        num_agents,
+        enforce_collaboration=enforce_collaboration,
+        self_aux_penalty=self_aux_penalty,
+    )
     eval_logger, eval_aggregator = get_logger_and_aggregator(
         dataset_type, is_multi_turn
     )

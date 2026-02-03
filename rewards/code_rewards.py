@@ -10,7 +10,9 @@ from rewards.code_utils import (
     TimeoutException,
     check_aux_call_without_assignment,
     check_aux_function_usage,
+    check_collaboration_violation,
     check_function_definition,
+    check_main_defines_aux_internally,
     check_syntax,
     cleanup_code,
     concatenate_functions,
@@ -28,6 +30,8 @@ def execution_reward_aux(
     test_cases: List[str],
     entry_points: List[str],
     prompts: List[str] = None,  # Add prompts parameter
+    enforce_collaboration: bool = True,  # Enforce collaboration pattern
+    self_aux_penalty_value: float = 0.0,  # Penalty reward when main defines own aux
 ) -> List[float]:
     """
     Reward function for aux + main function collaboration on code tasks:
@@ -45,7 +49,25 @@ def execution_reward_aux(
     - +1.0 bonus if main function is NOT just a wrapper around aux function
     - -0.5 deduction if aux function is called but return value is ignored
 
-    Maximum reward: 4.0 (updated from 3.5)
+    COLLABORATION PENALTY (when enforce_collaboration=True):
+    - If main function defines its own aux function internally (instead of using the
+      externally provided one), ALL rewards are reset to self_aux_penalty_value (default: 0.0)
+    - This strongly discourages the main model from bypassing collaboration by writing
+      both aux and main functions itself.
+
+    Args:
+        completion1: List of aux function completions
+        completion2: List of main function completions
+        test_cases: List of test case strings
+        entry_points: List of main function names
+        prompts: List of prompt strings (optional)
+        enforce_collaboration: If True, apply penalty when main defines its own aux (default: True)
+        self_aux_penalty_value: Reward value when collaboration is violated (default: 0.0)
+
+    Returns:
+        List of reward values
+
+    Maximum reward: 4.0 (when collaboration is proper)
     """
     # Local print override based on VERBOSE
     if not VERBOSE:
@@ -289,6 +311,39 @@ def execution_reward_aux(
         except Exception as e:
             print(f"❌ Code loading failed: {str(e)}")
             signal.alarm(0)
+
+        # ================================================================
+        # COLLABORATION VIOLATION CHECK (before bonus calculation)
+        # ================================================================
+        print("\n🚨 COLLABORATION VIOLATION CHECK")
+        print("-" * 55)
+
+        # Check if main function defines its own aux function (violation of collaboration)
+        collaboration_violated = False
+        if enforce_collaboration:
+            # Check in both raw completion2 and extracted main_func
+            violation_in_raw, raw_msg = check_main_defines_aux_internally(c2, "aux")
+            violation_in_main, main_msg = check_main_defines_aux_internally(main_func, "aux")
+
+            if violation_in_raw or violation_in_main:
+                collaboration_violated = True
+                violation_msg = raw_msg if violation_in_raw else main_msg
+                print(f"🚫 COLLABORATION VIOLATION DETECTED!")
+                print(f"   {violation_msg}")
+                print(f"   Main function must use the externally provided aux function,")
+                print(f"   NOT define its own aux function internally.")
+                print(f"\n💀 PENALTY APPLIED: All rewards reset to {self_aux_penalty_value}")
+                print(f"   Previous reward: {reward}")
+                reward = self_aux_penalty_value
+                print(f"   Final reward after penalty: {reward}")
+                print(f"\n🏆 FINAL REWARD: {reward} / 4.0 (PENALIZED)")
+                rewards.append(reward)
+                continue  # Skip bonus calculations and go to next sample
+            else:
+                print(f"✅ No collaboration violation detected")
+                print(f"   Main function does not define its own aux function")
+        else:
+            print(f"⚠️  Collaboration enforcement is DISABLED (enforce_collaboration=False)")
 
         # ================================================================
         # LEVEL 3 BONUS: AUX FUNCTION USAGE AND ANTI-WRAPPER BONUSES

@@ -14,7 +14,7 @@ model:
 
 # LoRA PEFT configuration
 lora:
-  enabled: true
+  enabled: false
   r: 32  # rank of the update matrices
   lora_alpha: 32  # scaling factor
   lora_dropout: 0.0
@@ -47,7 +47,7 @@ magrpo:
   num_turns: 1
   num_train_epochs: 4
   per_device_train_batch_size: 1
-  rollout_buffer_size: 16
+  rollout_buffer_size: 4
   learning_rate: 2.0e-5
   eval_interval: 4
   eval_num_samples: 32
@@ -67,11 +67,18 @@ magrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -4
+  shift: -2
+
+# Collaboration enforcement settings
+# Prevents main function from defining its own aux function
+collaboration:
+  enforce: true  # If true, penalize main defining its own aux function
+  self_aux_penalty: 0.0  # Reward value when main defines its own aux (strong penalty)
+
 # wandb
 wandb:
   project: "HumanEval"
   entity: "contrl"
-  name: "magrpo_humaneval_qwen2.5-coder-1.5b-shift-4"
+  name: "magrpo_humaneval_qwen2.5-coder-1.5b-shift-2-coop_penalty0.0-must_call_aux-full"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]

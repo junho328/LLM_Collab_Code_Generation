@@ -661,3 +661,88 @@ class AuxUsageAnalyzer(ast.NodeVisitor):
             formatted_calls.append(f"Line {line}: {reason}")
 
         return formatted_calls
+
+
+def check_main_defines_aux_internally(main_code, aux_function_name="aux"):
+    """
+    Check if the main function code defines its own aux function internally.
+    This is a violation of collaboration - main should use the externally provided aux function,
+    not define its own.
+
+    Args:
+        main_code: The code containing the main function (completion2)
+        aux_function_name: Name of the aux function to check for (default: "aux")
+
+    Returns:
+        Tuple[bool, str]: (violation_detected, message)
+            - violation_detected: True if main defines its own aux function
+            - message: Description of the violation or success
+    """
+    if not main_code or not isinstance(main_code, str):
+        return False, "No main code provided"
+
+    # Pattern to detect aux function definition in main code
+    # Matches: def aux(...) with various spacing
+    aux_def_pattern = rf"^\s*def\s+{re.escape(aux_function_name)}\s*\("
+    
+    # Search line by line for aux function definition
+    lines = main_code.split("\n")
+    for line_num, line in enumerate(lines, 1):
+        if re.match(aux_def_pattern, line):
+            return True, f"Main code defines its own '{aux_function_name}' function at line {line_num}"
+    
+    # Also check using AST for more robust detection
+    try:
+        tree = ast.parse(main_code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == aux_function_name:
+                return True, f"Main code defines its own '{aux_function_name}' function (detected via AST)"
+    except SyntaxError:
+        # If AST parsing fails, rely on regex result only
+        pass
+    
+    return False, f"Main code does not define '{aux_function_name}' function internally"
+
+
+def check_collaboration_violation(main_code, aux_function_name="aux"):
+    """
+    Comprehensive check for collaboration violations.
+    A collaboration violation occurs when:
+    1. Main function defines its own aux function instead of using the externally provided one
+    2. Main function doesn't use the external aux function at all (optional, for future use)
+
+    Args:
+        main_code: The code containing the main function (completion2)
+        aux_function_name: Name of the aux function to check for (default: "aux")
+
+    Returns:
+        Tuple[bool, str, dict]: (violation_detected, message, details)
+            - violation_detected: True if any collaboration violation detected
+            - message: Human-readable description
+            - details: Dictionary with violation details
+    """
+    details = {
+        "defines_own_aux": False,
+        "uses_external_aux": False,
+        "violation_type": None,
+    }
+
+    # Check if main defines its own aux
+    defines_aux, aux_def_msg = check_main_defines_aux_internally(main_code, aux_function_name)
+    details["defines_own_aux"] = defines_aux
+
+    if defines_aux:
+        details["violation_type"] = "self_defined_aux"
+        return True, f"COLLABORATION VIOLATION: {aux_def_msg}", details
+
+    # Check if main uses aux function (good behavior)
+    uses_aux = check_aux_function_usage(main_code, aux_function_name)
+    details["uses_external_aux"] = uses_aux
+
+    if not uses_aux:
+        # Not using aux at all is less severe than defining own aux
+        # This may be intentional for some problems
+        details["violation_type"] = "no_aux_usage"
+        return False, f"Main function does not use '{aux_function_name}' function", details
+
+    return False, "Collaboration pattern is correct: main uses external aux function", details
