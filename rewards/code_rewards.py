@@ -581,7 +581,7 @@ def execution_reward_bigcodebench(
         )
 
         if aux_check_passed:
-            reward += 0.2
+            reward += 0.4
             print(f"✅ {aux_message}: +0.2 (total: {reward})")
         else:
             print(f"⚠️  {aux_message} (continuing without aux reward)")
@@ -592,7 +592,7 @@ def execution_reward_bigcodebench(
         )
 
         if main_check_passed:
-            reward += 0.4
+            reward += 0.6
             print(f"✅ {main_message}: +0.4 (total: {reward})")
         else:
             print(f"❌ {main_message}")
@@ -625,7 +625,7 @@ def execution_reward_bigcodebench(
         syntax_passed, syntax_message = check_syntax(combined_code, "Combined code")
 
         if syntax_passed:
-            reward += 0.4
+            reward += 0.5
             print(f"✅ {syntax_message}: +0.4 (total: {reward})")
         else:
             print(f"❌ {syntax_message}")
@@ -651,7 +651,7 @@ def execution_reward_bigcodebench(
 
         # Calculate proportional reward for test cases (0 to +1.5)
         if total_tests > 0:
-            test_reward = (passed_tests / total_tests) * 1.5
+            test_reward = (passed_tests / total_tests) * 1.0
             reward += test_reward
             print(f"✅ Test reward: +{test_reward:.2f} (total: {reward})")
 

@@ -196,7 +196,9 @@ def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
 
 Problem: {instruct_prompt}
 
-{imports_section}RULES:
+{imports_section}
+
+RULES:
 1. Function name MUST be exactly 'aux' (not '{entry_point}')
 2. Write actual implementation code
 3. You can use the imported libraries.
@@ -204,7 +206,9 @@ Problem: {instruct_prompt}
 4. Output ONLY the function code starting with 'def aux('
 5. No imports, no markdown, no explanations
 
-"""
+Your output should follow this format:
+
+def aux(...):\n # your function code here\nreturn result\n"""
 
     return prompt_text
 
@@ -243,15 +247,17 @@ def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
 
         # Choose aux usage instruction based on config
         if force_aux_usage:
-            aux_note = "You MUST use the helper function aux() if helpful."
+            aux_note = "You MUST infer and call the helper function aux() to assign value to a variable within your function."
         else:
-            aux_note = "You can use the helper function aux() if helpful."
+            aux_note = "You can infer and call the helper function aux() if helpful."
 
         prompt_text = f"""Implement the '{entry_point}' function for the following problem.
 
 Problem: {instruct_prompt}
 
-{imports_section}Function signature: {func_signature}
+{imports_section}
+
+Function signature: {func_signature}
 
 RULES:
 1. Output ONLY the function code starting with 'def task_func('
@@ -260,7 +266,9 @@ RULES:
 4. {aux_note}
 5. No imports, no markdown, no explanations
 
-"""
+Your output should follow this format:
+
+def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
 
         return prompt_text
     
