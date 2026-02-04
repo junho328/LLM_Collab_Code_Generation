@@ -133,13 +133,151 @@ def {entry_point}({params_str}):\n # your function code with aux() call here\nre
 
     return prompt_text
 
-def get_formatters(dataset_type: str, num_agents: int):
+
+def chaining_main_function_formatter(example: Dict[str, Any]) -> str:
+    """Formatter for Agent 2 in agent chaining mode.
+    
+    Agent 2 must first reason about what Agent 1's aux function will look like,
+    then generate the main function that uses it.
+    Output format: reasoning section + main function code
+    """
+    prompt = example.get("prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    params = extract_function_params_from_prompt(prompt)
+
+    if not params or not entry_point:
+        return "Error: Could not extract function information from prompt."
+
+    params_str = ", ".join(params)
+
+    prompt_text = f"""Solve this coding problem by implementing the required function.
+
+Problem:
+{prompt}
+
+You will work with a helper function 'aux(...)' that another agent will implement.
+Before writing your solution, you must FIRST predict what the aux function will do.
+
+STEP 1: Reason about what aux() will provide
+- Think about what helper functionality would be useful
+- Predict the aux function's signature and behavior
+- Write your prediction in <predicted_aux> tags
+
+STEP 2: Implement the main function using aux()
+- Use the aux() function you predicted
+- Write the complete {entry_point} function
+
+IMPORTANT INSTRUCTIONS:
+- Do NOT include markdown code blocks (```python)
+- Do NOT include test cases or example usage
+- Do NOT redefine the aux() function
+- You MUST call aux() in your main function
+
+Your output format:
+<predicted_aux>
+def aux(...):
+    # your prediction of what aux will do
+    return ...
+</predicted_aux>
+
+def {entry_point}({params_str}):
+    # your main function calling aux()
+    return result
+"""
+
+    return prompt_text
+
+
+def compute_format_reward(agent2_completion: str, actual_aux: str, batch_item: Dict) -> float:
+    """Compute format reward based on how well Agent 2's predicted aux matches Agent 1's actual aux.
+    
+    Agent 2's completion contains:
+    1. <predicted_aux> block with predicted aux function
+    2. Main function implementation
+    
+    This evaluates whether Agent 2 correctly predicted:
+    1. The structure of the aux function
+    2. The function signature
+    3. Key implementation details
+    
+    Returns a reward between 0.0 and 1.0
+    """
+    import re
+    
+    if not agent2_completion or not actual_aux:
+        return 0.0
+    
+    reward = 0.0
+    
+    # Extract predicted aux from Agent 2's completion
+    predicted_match = re.search(r'<predicted_aux>(.*?)</predicted_aux>', agent2_completion, re.DOTALL)
+    predicted_aux = predicted_match.group(1).strip() if predicted_match else ""
+    
+    # Check 1: Is there a predicted_aux block? (0.2 points)
+    if predicted_aux:
+        reward += 0.2
+    else:
+        # No predicted_aux block - minimal reward
+        return 0.0
+    
+    # Check 2: Does the predicted aux have similar structure? (0.4 points)
+    # Look for function definition
+    pred_has_def = "def aux" in predicted_aux
+    actual_has_def = "def aux" in actual_aux
+    if pred_has_def and actual_has_def:
+        reward += 0.1
+        
+        # Check for similar parameter names
+        pred_params = re.findall(r'def\s+aux\s*\(([^)]*)\)', predicted_aux)
+        actual_params = re.findall(r'def\s+aux\s*\(([^)]*)\)', actual_aux)
+        
+        if pred_params and actual_params:
+            pred_param_set = set(p.strip().split(':')[0].strip() for p in pred_params[0].split(',') if p.strip())
+            actual_param_set = set(p.strip().split(':')[0].strip() for p in actual_params[0].split(',') if p.strip())
+            
+            if pred_param_set and actual_param_set:
+                overlap = len(pred_param_set & actual_param_set)
+                total = max(len(pred_param_set), len(actual_param_set))
+                if total > 0:
+                    reward += 0.3 * (overlap / total)
+    
+    # Check 3: Does the predicted aux mention similar concepts/keywords? (0.4 points)
+    # Extract keywords from actual aux
+    actual_keywords = set(re.findall(r'\b\w+\b', actual_aux.lower()))
+    predicted_keywords = set(re.findall(r'\b\w+\b', predicted_aux.lower()))
+    
+    # Common Python keywords to ignore
+    ignore_words = {'def', 'return', 'if', 'else', 'for', 'in', 'while', 'and', 'or', 
+                   'not', 'is', 'the', 'a', 'an', 'to', 'of', 'that', 'this', 'with',
+                   'should', 'function', 'would', 'aux', 'true', 'false', 'none',
+                   'your', 'prediction', 'what', 'will', 'do'}
+    
+    actual_meaningful = actual_keywords - ignore_words
+    predicted_meaningful = predicted_keywords - ignore_words
+    
+    if actual_meaningful and predicted_meaningful:
+        overlap = len(actual_meaningful & predicted_meaningful)
+        if len(actual_meaningful) > 0:
+            concept_match = overlap / len(actual_meaningful)
+            reward += 0.4 * min(concept_match, 1.0)
+    
+    return min(reward, 1.0)
+
+def get_formatters(dataset_type: str, num_agents: int, agent_chaining: bool = False):
     """Get a list of per-agent formatters based on dataset type and agent count.
 
     For code tasks, use aux formatters for all agents except the last, which uses main.
+    If agent_chaining is True, Agent 2 uses chaining_main_function_formatter which
+    includes reasoning about Agent 1's aux before generating main.
     """
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"] and num_agents == 2:
-        return [aux_function_formatter, main_function_formatter]
+        if agent_chaining:
+            # Agent Chaining mode: Agent 2 reasons about aux first, then generates main
+            return [aux_function_formatter, chaining_main_function_formatter]
+        else:
+            # Standard mode
+            return [aux_function_formatter, main_function_formatter]
 
     raise NotImplementedError("Other number of agents have not been implemented yet")
 
@@ -449,6 +587,39 @@ def main():
     # ------------------------------------------------------------------
     # Build training args
     # ------------------------------------------------------------------
+    
+    # Agent Chaining configuration
+    chaining_config = (
+        config.get_section("agent_chaining") if hasattr(config, "get_section") else {}
+    )
+    agent_chaining_enabled = chaining_config.get("enabled", False)
+    max_new_tokens_per_agent = chaining_config.get("max_new_tokens_per_agent", None)
+    format_reward_weight = chaining_config.get("format_reward_weight", 0.1)
+    
+    if output_verbose and agent_chaining_enabled:
+        print("\n" + "=" * 60)
+        print("Agent Chaining Configuration")
+        print("=" * 60)
+        print(f"  Enabled: {agent_chaining_enabled}")
+        print(f"  Max tokens per agent: {max_new_tokens_per_agent}")
+        print(f"  Format reward weight: {format_reward_weight}")
+        print("=" * 60 + "\n")
+    
+    # Chat Template configuration (for Instruct models)
+    chat_template_config = (
+        config.get_section("chat_template") if hasattr(config, "get_section") else {}
+    )
+    use_chat_template = chat_template_config.get("enabled", False)
+    chat_template_system_prompt = chat_template_config.get("system_prompt", None)
+    
+    if output_verbose and use_chat_template:
+        print("\n" + "=" * 60)
+        print("Chat Template Configuration")
+        print("=" * 60)
+        print(f"  Enabled: {use_chat_template}")
+        print(f"  System prompt: {chat_template_system_prompt[:50] + '...' if chat_template_system_prompt and len(chat_template_system_prompt) > 50 else chat_template_system_prompt}")
+        print("=" * 60 + "\n")
+    
     magrpo_args_kwargs = {
         "output_dir": output_dir,
         "num_agents": num_agents,  # Pass num_agents to the config
@@ -472,6 +643,13 @@ def main():
         "termination_threshold": magrpo_config.get("termination_threshold", -0.2),
         "rollout_buffer_size": magrpo_config.get("rollout_buffer_size", 2),
         "external_prompt_passthrough": True,
+        # Agent Chaining parameters
+        "agent_chaining": agent_chaining_enabled,
+        "max_new_tokens_per_agent": max_new_tokens_per_agent,
+        "format_reward_weight": format_reward_weight,
+        # Chat Template parameters (for Instruct models)
+        "use_chat_template": use_chat_template,
+        "chat_template_system_prompt": chat_template_system_prompt,
     }
     if "top_k" in magrpo_config:
         magrpo_args_kwargs["top_k"] = magrpo_config.get("top_k")
@@ -480,7 +658,7 @@ def main():
     # ------------------------------------------------------------------
     # Formatters, rewards, and logging
     # ------------------------------------------------------------------
-    formatters = get_formatters(dataset_type, num_agents)
+    formatters = get_formatters(dataset_type, num_agents, agent_chaining=agent_chaining_enabled)
 
     # Load collaboration enforcement settings from config
     collaboration_cfg = (
@@ -705,6 +883,13 @@ def main():
         trainer_kwargs["external_transition"] = external_transition_wrapper
 
     trainer = MAGRPOTrainer(**trainer_kwargs)
+    
+    # Set up Agent Chaining format reward if enabled
+    if agent_chaining_enabled:
+        trainer.set_format_reward_func(compute_format_reward)
+        if output_verbose:
+            print("[Agent Chaining] Format reward function set.")
+    
     trainer.train()
     save_final = config.get("output.save_final_model", False)
     if save_final:

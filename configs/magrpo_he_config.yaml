@@ -45,7 +45,7 @@ external:
 # magrpo
 magrpo:
   num_turns: 1
-  num_train_epochs: 4
+  num_train_epochs: 3
   per_device_train_batch_size: 1
   rollout_buffer_size: 4
   learning_rate: 2.0e-5
@@ -67,7 +67,7 @@ magrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -2
+  shift: -4
 
 # Collaboration enforcement settings
 # Prevents main function from defining its own aux function
@@ -75,10 +75,24 @@ collaboration:
   enforce: true  # If true, penalize main defining its own aux function
   self_aux_penalty: 0.0  # Reward value when main defines its own aux (strong penalty)
 
+# Agent Chaining configuration
+# When enabled, Agent 2 first reasons about Agent 1's aux function, then generates main
+# Agent 2's single output includes: <predicted_aux>...</predicted_aux> + main function
+agent_chaining:
+  enabled: true  # Set to true to enable agent chaining mode
+  max_new_tokens_per_agent: [256, 384]  # [Agent 1 (aux), Agent 2 (reasoning + main)]
+  format_reward_weight: 0.5  # Weight for format reward (how well predicted aux matches actual)
+
+# Chat Template configuration (for Instruct models)
+# When enabled, applies chat template to prompts and extracts assistant response from completions
+chat_template:
+  enabled: true  # Set to true for Instruct models (e.g., Qwen2.5-Coder-1.5B-Instruct)
+  system_prompt: "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+
 # wandb
 wandb:
   project: "HumanEval"
   entity: "contrl"
-  name: "magrpo_humaneval_qwen2.5-coder-1.5b-shift-2-coop_penalty0.0-must_call_aux-full"
+  name: "acgrpo_he_1.5b-instruct-shift-4-coop_penalty0.0-must_call_aux-full"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]
