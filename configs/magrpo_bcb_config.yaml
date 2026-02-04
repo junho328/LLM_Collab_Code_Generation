@@ -22,7 +22,7 @@ dataset:
   name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/data/bcb.jsonl"
   type: "bigcodebench"
   train_split: "0:180"
-  eval_split: "180:212"
+  eval_split: "180:200"
   shuffle_train: true
   shuffle_eval: false
 
@@ -51,18 +51,19 @@ external:
 
 # magrpo
 magrpo:
+  num_turns: 1
   num_train_epochs: 6
   per_device_train_batch_size: 1
   rollout_buffer_size: 4
   learning_rate: 2.0e-5
   eval_interval: 4
-  eval_num_samples: 16
+  eval_num_samples: 20
   num_generations: 4
   max_new_tokens: 512
   temperature: 0.7
   top_p: 0.9
   top_k: null
-  repetition_penalty: None  # Penalize repetitive generation
+  repetition_penalty: 1.1  # Penalize repetitive generation
   joint_mode: aligned
   num_agents: 2
   logging_steps: 5
@@ -79,12 +80,12 @@ magrpo:
 reward_processor:
   enabled: true
   scale_factor: 1.0
-  shift: -2
+  shift: -4
 
 # wandb
 wandb:
   project: "BigCodeBench"
   entity: "contrl"
-  name: "magrpo_bcb_qwen2.5-3b_shift-2_full"
+  name: "magrpo_bcb_qwen2.5-3b_shift-4_full"
   dir: "output"
   tags: ["magrpo", "bigcodebench", "multi-agent"]

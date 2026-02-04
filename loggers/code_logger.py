@@ -65,7 +65,7 @@ def code_reward_logger(
             "passed_tests": 0,
             "total_tests": 0,
             "passed_rate": 0.0,
-            "all_tests_passed": 0,  # 1 if all tests passed, 0 otherwise
+            "fully_passed": 0,  # 1 if all tests passed, 0 otherwise
             "timeout_num": 0,
             "bonus_reward": 0.0,
             "aux_usage_bonus": 0.0,
@@ -191,7 +191,7 @@ def code_reward_logger(
                 metrics["test_reward"] = metrics["passed_rate"] * 1.0
                 # Check if all tests passed
                 if passed_tests == metrics["total_tests"]:
-                    metrics["all_tests_passed"] = 1
+                    metrics["fully_passed"] = 1
 
         except Exception:
             # Code loading failed
@@ -314,7 +314,7 @@ def code_reward_logger_bigcodebench(
             "passed_tests": 0,
             "total_tests": 0,
             "passed_rate": 0.0,
-            "all_tests_passed": 0,  # 1 if all tests passed, 0 otherwise
+            "fully_passed": 0,  # 1 if all tests passed, 0 otherwise
             "timeout_num": 0,
             "bonus_reward": 0.0,
             "aux_usage_bonus": 0.0,
@@ -398,7 +398,7 @@ def code_reward_logger_bigcodebench(
             metrics["test_reward"] = metrics["passed_rate"] * 1.0
             # Check if all tests passed
             if passed_tests == total_tests:
-                metrics["all_tests_passed"] = 1
+                metrics["fully_passed"] = 1
 
         # Level 3 reward is just test reward at this point
         metrics["level_3_reward"] = metrics["test_reward"]

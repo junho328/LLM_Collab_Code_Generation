@@ -176,12 +176,10 @@ def _extract_imports_for_prompt(code_prompt: str) -> str:
 def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
     """Formatter for the auxiliary function generator (Agent 1) for BigCodeBench tasks."""
     # BigCodeBench uses instruct_prompt for task description
-    instruct_prompt = example.get("instruct_prompt", "")
+    # instruct_prompt = example.get("instruct_prompt", "")
     code_prompt = example.get("code_prompt", "")
+    complete_prompt = example.get("complete_prompt", "")
     entry_point = example.get("entry_point", "")
-
-    if not instruct_prompt:
-        return "Error: Could not extract task information from BigCodeBench data."
 
     # Extract imports to show available libraries
     available_imports = _extract_imports_for_prompt(code_prompt)
@@ -189,12 +187,12 @@ def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
     if available_imports:
         imports_section = f"""Available libraries (already imported):
 {available_imports}
-
 """
 
     prompt_text = f"""Create a helper function named 'aux' for the following problem.
 
-Problem: {instruct_prompt}
+Problem: 
+{complete_prompt}
 
 {imports_section}
 
@@ -208,7 +206,7 @@ RULES:
 
 Your output should follow this format:
 
-def aux(...):\n # your function code here\nreturn result\n"""
+def aux(...):\n # your aux function code here\nreturn result\n"""
 
     return prompt_text
 
@@ -221,20 +219,16 @@ def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
     """
     def bigcodebench_main_formatter(example: Dict[str, Any]) -> str:
         """Formatter for the main function generator (Agent 2) for BigCodeBench tasks."""
-        instruct_prompt = example.get("instruct_prompt", "")
+        # instruct_prompt = example.get("instruct_prompt", "")
+        complete_prompt = example.get("complete_prompt", "")
         code_prompt = example.get("code_prompt", "")
         entry_point = example.get("entry_point", "")
 
-        if not instruct_prompt or not entry_point:
-            return "Error: Could not extract task information from BigCodeBench data."
-
         # Extract function signature from code_prompt
         func_signature = ""
-        if code_prompt:
-            for line in code_prompt.split("\n"):
-                if line.strip().startswith(f"def {entry_point}"):
-                    func_signature = line.strip()
-                    break
+        for line in code_prompt.split("\n"):
+            if line.strip().startswith(f"def {entry_point}"):
+                func_signature = line.strip()
 
         # Extract imports to show available libraries
         available_imports = _extract_imports_for_prompt(code_prompt)
@@ -242,7 +236,6 @@ def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
         if available_imports:
             imports_section = f"""Available libraries (already imported):
 {available_imports}
-
 """
 
         # Choose aux usage instruction based on config
@@ -253,11 +246,10 @@ def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
 
         prompt_text = f"""Implement the '{entry_point}' function for the following problem.
 
-Problem: {instruct_prompt}
+Problem: 
+{complete_prompt}
 
 {imports_section}
-
-Function signature: {func_signature}
 
 RULES:
 1. Output ONLY the function code starting with 'def task_func('
@@ -268,7 +260,7 @@ RULES:
 
 Your output should follow this format:
 
-def {entry_point}({params_str}):\n # your function code here\nreturn result\n"""
+{func_signature}\n # your function code here\nreturn result\n"""
 
         return prompt_text
     
@@ -368,7 +360,7 @@ def _bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=N
     test_cases = []
     entry_points = []
     code_prompts = []
-    instruct_prompts = []
+    complete_prompts = []
 
     if batch_items is not None:
         for item in batch_items:
@@ -377,13 +369,13 @@ def _bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=N
             entry_points.append(item.get("entry_point", ""))
             # BigCodeBench has code_prompt with imports and function signature
             code_prompts.append(item.get("code_prompt", ""))
-            # BigCodeBench has instruct_prompt with task description
-            instruct_prompts.append(item.get("instruct_prompt", ""))
+            # BigCodeBench has complete_prompt with task description
+            complete_prompts.append(item.get("complete_prompt", ""))
     else:
         raise ValueError("batch_items must be provided for BigCodeBench reward calculation")
 
     return execution_reward_bigcodebench(
-        completion1, completion2, test_cases, entry_points, code_prompts, instruct_prompts
+        completion1, completion2, test_cases, entry_points, code_prompts, complete_prompts
     )
 
 

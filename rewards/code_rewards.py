@@ -486,7 +486,7 @@ def execution_reward_bigcodebench(
     test_cases: List[str],
     entry_points: List[str],
     code_prompts: List[str] = None,
-    instruct_prompts: List[str] = None,
+    complete_prompts: List[str] = None,
 ) -> List[float]:
     """
     Reward function for aux + main function collaboration on BigCodeBench tasks.
@@ -522,12 +522,12 @@ def execution_reward_bigcodebench(
     if code_prompts is None:
         code_prompts = [""] * len(completion1)
     
-    # Handle case where instruct_prompts is not provided
-    if instruct_prompts is None:
-        instruct_prompts = [""] * len(completion1)
+    # Handle case where prompt is not provided
+    if complete_prompts is None:
+        complete_prompts = [""] * len(completion1)
 
     for c1, c2, test_code, entry_point, code_prompt, instruct_prompt in zip(
-        completion1, completion2, test_cases, entry_points, code_prompts, instruct_prompts
+        completion1, completion2, test_cases, entry_points, code_prompts,complete_prompts
     ):
         reward = 0.0
 
