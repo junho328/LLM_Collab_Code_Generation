@@ -8,22 +8,29 @@ def mt_humaneval_logger(
     test_cases: List[str],
     entry_points: List[str],
     prompts: Optional[List[str]] = None,
+    dataset_type: Optional[str] = None,
+    code_prompts: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Multi-turn logger for code generation tasks (HumanEval/CoopHumanEval) with aux + main function collaboration.
+    Multi-turn logger for code generation tasks (HumanEval/CoopHumanEval/BigCodeBench) with aux + main function collaboration.
 
     Args:
         agent_completions_turns: List per agent -> per sample -> per turn completions
         test_cases: List of test cases
         entry_points: List of entry point function names
-        prompts: Optional list of prompts for import extraction
+        prompts: Optional list of prompts for import extraction (HumanEval)
+        dataset_type: Type of dataset (humaneval, bigcodebench, etc.)
+        code_prompts: Optional list of code_prompts for import extraction (BigCodeBench)
 
     Returns:
         List of metric dictionaries with multi-turn information
     """
-    from loggers.code_logger import code_reward_logger
+    from loggers.code_logger import code_reward_logger, code_reward_logger_bigcodebench
 
     all_metrics = []
+    
+    # Determine if this is BigCodeBench dataset
+    is_bigcodebench = dataset_type and dataset_type.lower() in ["bigcodebench", "bcb"]
 
     # Derive completions for aux/main from agent_completions_turns
     # agent_completions_turns shape: [num_agents][num_samples][num_turns]
@@ -70,14 +77,25 @@ def mt_humaneval_logger(
                 for j in range(len(test_cases))
             ]
 
-            # Get metrics for this turn using the single-turn logger
-            turn_metrics = code_reward_logger(
-                [turn_completions1[i]],
-                [turn_completions2[i]],
-                [test_cases[i]],
-                [entry_points[i]],
-                [prompts[i]] if prompts else None,
-            )
+            # Get metrics for this turn using the appropriate logger
+            if is_bigcodebench:
+                # Use BigCodeBench-specific logger
+                turn_metrics = code_reward_logger_bigcodebench(
+                    [turn_completions1[i]],
+                    [turn_completions2[i]],
+                    [test_cases[i]],
+                    [entry_points[i]],
+                    [code_prompts[i]] if code_prompts else None,
+                )
+            else:
+                # Use HumanEval/CoopHumanEval logger
+                turn_metrics = code_reward_logger(
+                    [turn_completions1[i]],
+                    [turn_completions2[i]],
+                    [test_cases[i]],
+                    [entry_points[i]],
+                    [prompts[i]] if prompts else None,
+                )
 
             if turn_metrics:
                 turn_metric = turn_metrics[0]

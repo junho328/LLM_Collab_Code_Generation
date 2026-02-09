@@ -1,0 +1,122 @@
+# ACPPO Configuration for BigCodeBench
+# ACPPO: Agent-Chained Policy Optimization
+# Combines:
+# - Simultaneous model updates (like MAPPO/MAGRPO)
+# - Per-agent value networks (decentralized)
+# - Agent chaining with KL similarity reward
+# - TD-based refined advantage calculation
+
+# model
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  type: "qwen"
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 2048
+  tokenizer_kwargs:
+    trust_remote_code: true
+    padding_side: "left"
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: "bfloat16"
+  special_tokens: {}
+
+# LoRA PEFT configuration (for policy models)
+lora:
+  enabled: false  # Enable LoRA to reduce memory usage
+  r: 32  # rank of the update matrices
+  lora_alpha: 32  # scaling factor
+  lora_dropout: 0.0
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+# dataset - BigCodeBench (local JSONL file)
+dataset:
+  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/bcb_example_codes/bcb.jsonl"
+  type: "bigcodebench"
+  train_split: "0:180"
+  eval_split: "180:200"
+  shuffle_train: false
+  shuffle_eval: false
+
+seed: 42
+
+# output
+output:
+  base_dir: "/home/work/aipr-jhna/output"
+  save_final_model: false
+  verbose: false  # Enable debug output
+  log_completions: true
+  log_max_samples_per_file: 10
+
+# external
+external:
+  mode: "level_feedback"
+  sandbox_slice: 1
+
+# ACPPO configuration
+acppo:
+  
+  # Training parameters
+  num_turns: 1
+  num_train_epochs: 10
+  per_device_train_batch_size: 1
+  rollout_buffer_size: 4  # Number of samples to collect before update
+  learning_rate: 2.0e-6  # Policy (LoRA) learning rate
+  eval_interval: 4
+  eval_num_samples: 20
+  # num_generations: Value-based methods don't need multiple samples for advantage baseline
+  # Set to 1 since TD-based advantages use V(s) estimates, not group-relative normalization
+  num_generations: 1
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  top_k: null
+  repetition_penalty: 1.1  # Penalize repetitive generation
+  num_agents: 2
+  discount: 0.9
+  
+  # Per-agent value network parameters (decentralized, not centralized)
+  # Each agent has its own value head (2-layer MLP) on frozen backbone
+  value_head_hidden_dim: 256  # Hidden dimension for 2-layer MLP value head
+  value_learning_rate: 2.0e-5  # Learning rate for value head
+  value_loss_coef: 0.1  # Coefficient for value loss (MSE against returns)
+  
+  # TD-based advantage parameters (ACPPO-specific)
+  # Advantage: A_t^{(i)} = sum (gamma' * lambda')^{j-i} * zeta^{(j)}
+  # Where zeta is TD residual
+  gamma_prime: 0.99  # Gamma' for TD residuals
+  lambda_prime: 0.95  # Lambda' for GAE-like weighting
+  advantage_normalization: true  # Whether to normalize advantages
+  
+  # Agent chaining parameters
+  # Agent 2 first predicts Agent 1's aux, then generates main function
+  # Uses natural Python comment format instead of XML tags
+  agent_chaining: true
+  max_new_tokens_per_agent: [512, 768]  # Agent 2 needs more tokens for reasoning
+  
+  # Force main agent to use aux function (instead of optional)
+  force_aux_usage: true
+  
+  # PPO Clip parameters
+  # If use_ppo_clip=True: loss = -min(ratio * A, clip(ratio, 1-eps, 1+eps) * A)
+  # If use_ppo_clip=False: loss = -log_prob * A (simple policy gradient)
+  use_ppo_clip: false  # Disable for now since old_log_probs not stored
+  ppo_clip_eps: 0.2  # PPO clipping epsilon
+
+  logging_steps: 5
+  save_steps: 250
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -2
+
+# wandb
+wandb:
+  project: "BigCodeBench"
+  entity: "contrl"
+  name: "acppo_bcb_qwen2.5-3b_shift-2_full"
+  dir: "output"
+  tags: ["acppo", "bigcodebench", "multi-agent", "agent-chaining", "kl-reward", "td-advantage"]

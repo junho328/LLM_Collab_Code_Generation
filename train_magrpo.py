@@ -5,6 +5,7 @@ Supports multiple datasets and configurations via YAML files.
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -12,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
  
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from config import Config, add_config_args, parse_overrides
 from datasets import load_dataset
@@ -26,7 +27,7 @@ from loggers.mt_code_logger import (
     mt_humaneval_logger,
 )
 
-from rewards.code_rewards import execution_reward_aux
+from rewards.code_rewards import execution_reward_aux, execution_reward_bigcodebench
 from comlrl.utils.reward_processor import RewardProcessors
 from comlrl.trainers.magrpo import MAGRPOConfig, MAGRPOTrainer
 import external as external_ctx
@@ -47,6 +48,107 @@ def _set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def load_json_dataset(
+    json_path: str,
+    train_split: str,
+    eval_split: str,
+    verbose: bool = False,
+    shuffle_train: bool = False,
+    shuffle_eval: bool = False,
+    seed: int = 42,
+) -> Tuple[Any, Any]:
+    """
+    Load dataset from a JSON or JSONL file.
+    
+    Args:
+        json_path: Path to the JSON/JSONL file
+        train_split: Split specification like "train[:500]" or "0:500"
+        eval_split: Split specification like "train[500:550]" or "500:550"
+        verbose: Whether to print loading information
+        shuffle_train: Whether to shuffle the training dataset
+        shuffle_eval: Whether to shuffle the evaluation dataset
+        seed: Random seed for shuffling
+        
+    Returns:
+        Tuple of (train_dataset, eval_dataset)
+    """
+    from datasets import Dataset
+    
+    # Load data from JSON/JSONL file
+    data = []
+    with open(json_path, 'r', encoding='utf-8') as f:
+        # Check if it's JSONL (one JSON per line) or regular JSON
+        first_char = f.read(1)
+        f.seek(0)
+        
+        if first_char == '[':
+            # Regular JSON array
+            data = json.load(f)
+        else:
+            # JSONL format
+            for line in f:
+                line = line.strip()
+                if line:
+                    data.append(json.loads(line))
+    
+    if verbose:
+        print(f"Loaded {len(data)} samples from {json_path}")
+    
+    # Parse split specifications
+    def parse_split(split_str: str, total_len: int) -> Tuple[int, int]:
+        """Parse split string like 'train[:500]' or '0:500' into (start, end)."""
+        # Remove 'train' prefix if present
+        split_str = re.sub(r'^(train|test|validation)\s*', '', split_str)
+        # Remove brackets
+        split_str = split_str.strip('[]')
+        
+        if ':' in split_str:
+            parts = split_str.split(':')
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else total_len
+        else:
+            # Single index
+            start = 0
+            end = int(split_str) if split_str else total_len
+        
+        # Handle negative indices
+        if start < 0:
+            start = total_len + start
+        if end < 0:
+            end = total_len + end
+            
+        return max(0, start), min(total_len, end)
+    
+    total_len = len(data)
+    
+    train_start, train_end = parse_split(train_split, total_len)
+    eval_start, eval_end = parse_split(eval_split, total_len)
+    
+    train_data = data[train_start:train_end]
+    eval_data = data[eval_start:eval_end]
+    
+    if verbose:
+        print(f"Train split [{train_start}:{train_end}]: {len(train_data)} samples")
+        print(f"Eval split [{eval_start}:{eval_end}]: {len(eval_data)} samples")
+    
+    # Convert to HuggingFace Dataset
+    train_dataset = Dataset.from_list(train_data)
+    eval_dataset = Dataset.from_list(eval_data)
+    
+    # Shuffle datasets if requested
+    if shuffle_train:
+        train_dataset = train_dataset.shuffle(seed=seed)
+        if verbose:
+            print(f"Train dataset shuffled with seed={seed}")
+    
+    if shuffle_eval:
+        eval_dataset = eval_dataset.shuffle(seed=seed)
+        if verbose:
+            print(f"Eval dataset shuffled with seed={seed}")
+    
+    return train_dataset, eval_dataset
 
 
 def aux_function_formatter(example: Dict[str, Any]) -> str:
@@ -264,12 +366,196 @@ def compute_format_reward(agent2_completion: str, actual_aux: str, batch_item: D
     
     return min(reward, 1.0)
 
-def get_formatters(dataset_type: str, num_agents: int, agent_chaining: bool = False):
+
+# ============================================================================
+# BigCodeBench Formatters
+# ============================================================================
+
+def _extract_imports_for_prompt(code_prompt: str) -> str:
+    """Extract import statements from code_prompt for display in prompt."""
+    if not code_prompt:
+        return ""
+    
+    import_lines = []
+    for line in code_prompt.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            import_lines.append(stripped)
+        elif stripped.startswith("def "):
+            break  # Stop at function definition
+    
+    return "\n".join(import_lines)
+
+
+def bigcodebench_aux_formatter(example: Dict[str, Any]) -> str:
+    """Formatter for the auxiliary function generator (Agent 1) for BigCodeBench tasks."""
+    code_prompt = example.get("code_prompt", "")
+    complete_prompt = example.get("complete_prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    # Extract imports to show available libraries
+    available_imports = _extract_imports_for_prompt(code_prompt)
+    imports_section = ""
+    if available_imports:
+        imports_section = f"""Available libraries (already imported):
+{available_imports}
+"""
+
+    prompt_text = f"""Create a helper function for this coding problem.
+
+Problem: 
+{complete_prompt}
+
+{imports_section}
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the function
+- Do NOT include test cases or example usage
+- Do NOT import additional libraries
+- Create a helper function named 'aux' that can assist the main function
+- The function should return useful data for solving the problem
+
+Your output should follow this format:
+
+def aux(...):\n # your aux function code here\nreturn result\n"""
+
+    return prompt_text
+
+
+def create_bigcodebench_main_formatter(force_aux_usage: bool = False):
+    """Factory function to create a main formatter with configurable aux usage.
+    
+    Args:
+        force_aux_usage: If True, prompt requires aux() usage. If False, aux() is optional.
+    """
+    def bigcodebench_main_formatter(example: Dict[str, Any]) -> str:
+        """Formatter for the main function generator (Agent 2) for BigCodeBench tasks."""
+        complete_prompt = example.get("complete_prompt", "")
+        code_prompt = example.get("code_prompt", "")
+        entry_point = example.get("entry_point", "")
+
+        # Extract function signature from code_prompt
+        func_signature = ""
+        for line in code_prompt.split("\n"):
+            if line.strip().startswith(f"def {entry_point}"):
+                func_signature = line.strip()
+                break
+
+        # Extract imports to show available libraries
+        available_imports = _extract_imports_for_prompt(code_prompt)
+        imports_section = ""
+        if available_imports:
+            imports_section = f"""Available libraries (already imported):
+{available_imports}
+"""
+
+        # Choose aux usage instruction based on config
+        if force_aux_usage:
+            aux_note = "You MUST infer and call the helper function aux() to assign value to a variable within your function."
+        else:
+            aux_note = "You can infer and call the helper function aux() if helpful."
+
+        prompt_text = f"""Implement the '{entry_point}' function for the following problem.
+
+Problem: 
+{complete_prompt}
+
+{imports_section}
+
+You have access to a helper function aux() that you can call.
+
+Requirements:
+- Implement the function '{entry_point}' with the specified signature
+- {aux_note}
+- Do NOT redefine aux()
+- Include a return statement with actual computed values
+- Do NOT include docstrings (no triple quotes)
+- Do NOT import additional libraries
+- Output ONLY the Python function code, nothing else
+
+Your output should follow this format:
+
+{func_signature}\n # your function code with aux function call here\nreturn result"""
+
+        return prompt_text
+    
+    return bigcodebench_main_formatter
+
+
+def chaining_bigcodebench_main_formatter(example: Dict[str, Any]) -> str:
+    """
+    Formatter for Agent 2 in agent chaining mode for BigCodeBench tasks.
+    
+    Agent 2 first predicts what Agent 1 will generate (auxiliary function),
+    then generates the main function.
+    """
+    complete_prompt = example.get("complete_prompt", "")
+    code_prompt = example.get("code_prompt", "")
+    entry_point = example.get("entry_point", "")
+
+    # Extract function signature from code_prompt
+    func_signature = ""
+    for line in code_prompt.split("\n"):
+        if line.strip().startswith(f"def {entry_point}"):
+            func_signature = line.strip()
+            break
+
+    # Extract imports to show available libraries
+    available_imports = _extract_imports_for_prompt(code_prompt)
+    imports_section = ""
+    if available_imports:
+        imports_section = f"""Available libraries (already imported):
+{available_imports}
+"""
+
+    prompt_text = f"""Solve this coding problem by implementing the required function.
+
+Problem: 
+{complete_prompt}
+
+{imports_section}
+
+You will use a helper function aux() that you need to predict first.
+
+IMPORTANT INSTRUCTIONS:
+- Output ONLY the function code, no explanations or examples
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any text before or after the functions
+- Do NOT include test cases or example usage
+- Do NOT import additional libraries
+- First, write the aux() helper function you predict will be useful
+- Then, write the '{entry_point}' function that calls aux()
+
+Your output should follow this format:
+
+# Predicted helper function
+def aux(...):
+    # helper function code here
+    return result
+
+# Main function
+{func_signature}
+    # your function code with aux() call here
+    return result
+"""
+
+    return prompt_text
+
+
+def get_formatters(dataset_type: str, num_agents: int, agent_chaining: bool = False, force_aux_usage: bool = False):
     """Get a list of per-agent formatters based on dataset type and agent count.
 
     For code tasks, use aux formatters for all agents except the last, which uses main.
     If agent_chaining is True, Agent 2 uses chaining_main_function_formatter which
     includes reasoning about Agent 1's aux before generating main.
+    
+    Args:
+        dataset_type: Type of dataset (humaneval, coophumaneval, mbpp, bigcodebench)
+        num_agents: Number of agents in the collaboration
+        agent_chaining: If True, use agent chaining formatters
+        force_aux_usage: If True, require aux() usage in main function (BigCodeBench only)
     """
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"] and num_agents == 2:
         if agent_chaining:
@@ -279,7 +565,16 @@ def get_formatters(dataset_type: str, num_agents: int, agent_chaining: bool = Fa
             # Standard mode
             return [aux_function_formatter, main_function_formatter]
 
-    raise NotImplementedError("Other number of agents have not been implemented yet")
+    if dataset_type.lower() in ["bigcodebench", "bcb"] and num_agents == 2:
+        if agent_chaining:
+            # Agent Chaining mode for BigCodeBench
+            return [bigcodebench_aux_formatter, chaining_bigcodebench_main_formatter]
+        else:
+            # Standard mode for BigCodeBench
+            main_formatter = create_bigcodebench_main_formatter(force_aux_usage=force_aux_usage)
+            return [bigcodebench_aux_formatter, main_formatter]
+
+    raise NotImplementedError(f"Dataset type '{dataset_type}' with {num_agents} agents has not been implemented yet")
 
 
 def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
@@ -293,6 +588,12 @@ def get_logger_and_aggregator(dataset_type: str, is_multi_turn: bool = False):
     # Use unified multi-turn compatible logger/aggregator for code datasets
     if dataset_type.lower() in ["humaneval", "coophumaneval", "mbpp"]:
         return mt_humaneval_logger, aggregate_mt_humaneval_metrics_for_logging
+
+    # BigCodeBench also uses the same logger with dataset_type parameter
+    if dataset_type.lower() in ["bigcodebench", "bcb"]:
+        def logger_wrapper(**kwargs):
+            return mt_humaneval_logger(dataset_type=dataset_type, **kwargs)
+        return logger_wrapper, aggregate_mt_humaneval_metrics_for_logging
 
     return None, None
 
@@ -358,6 +659,46 @@ def get_reward_function(
 
         return reward_wrapper
 
+    if dataset_type.lower() in ["bigcodebench", "bcb"]:
+
+        def bigcodebench_reward_wrapper(*agent_completions, batch_items=None, prompts=None):
+            """Reward wrapper for BigCodeBench tasks."""
+            if not agent_completions or len(agent_completions) < 1:
+                return []
+
+            # Get aux (agent 1) and main (agent 2) completions
+            if len(agent_completions) >= 2:
+                completion1 = agent_completions[0]  # aux function
+                completion2 = agent_completions[-1]  # main function
+            else:
+                completion1 = [""] * len(agent_completions[0])
+                completion2 = agent_completions[0]
+
+            # Extract necessary data from batch_items
+            test_cases = []
+            entry_points = []
+            code_prompts = []
+
+            if batch_items is not None:
+                for item in batch_items:
+                    test_cases.append(item.get("test", ""))
+                    entry_points.append(item.get("entry_point", ""))
+                    code_prompts.append(item.get("code_prompt", ""))
+            else:
+                raise ValueError("batch_items must be provided for reward calculation")
+
+            return execution_reward_bigcodebench(
+                completion1,
+                completion2,
+                test_cases,
+                entry_points,
+                code_prompts,
+                enforce_collaboration=enforce_collaboration,
+                self_aux_penalty_value=self_aux_penalty,
+            )
+
+        return bigcodebench_reward_wrapper
+
     raise ValueError(f"Unknown dataset type: {dataset_type}")
 
 
@@ -404,6 +745,8 @@ def main():
             dataset_type = "coophumaneval"
         elif "mbpp" in dataset_name.lower():
             dataset_type = "mbpp"
+        elif "bigcodebench" in dataset_name.lower() or "bcb" in dataset_name.lower():
+            dataset_type = "bigcodebench"
         else:
             raise ValueError(
                 f"Could not infer dataset type from dataset name '{dataset_name}'. Please specify 'type' in dataset config."
@@ -448,8 +791,21 @@ def main():
     train_dataset = None
     eval_dataset = None
     try:
-        train_dataset = load_dataset(dataset_name, split=train_split)
-        eval_dataset = load_dataset(dataset_name, split=eval_split)
+        # Check if dataset_name is a JSON/JSONL file path
+        if dataset_name.endswith('.json') or dataset_name.endswith('.jsonl'):
+            train_dataset, eval_dataset = load_json_dataset(
+                json_path=dataset_name,
+                train_split=train_split,
+                eval_split=eval_split,
+                verbose=output_verbose,
+                shuffle_train=config.get("dataset.shuffle_train", False),
+                shuffle_eval=config.get("dataset.shuffle_eval", False),
+                seed=seed_value,
+            )
+        else:
+            # Load from HuggingFace Hub
+            train_dataset = load_dataset(dataset_name, split=train_split)
+            eval_dataset = load_dataset(dataset_name, split=eval_split)
 
     except Exception as e:
         print(f"Error loading dataset: {e}")
@@ -595,6 +951,7 @@ def main():
     agent_chaining_enabled = chaining_config.get("enabled", False)
     max_new_tokens_per_agent = chaining_config.get("max_new_tokens_per_agent", None)
     format_reward_weight = chaining_config.get("format_reward_weight", 0.1)
+    force_aux_usage = magrpo_config.get("force_aux_usage", False)
     
     if output_verbose and agent_chaining_enabled:
         print("\n" + "=" * 60)
@@ -658,7 +1015,7 @@ def main():
     # ------------------------------------------------------------------
     # Formatters, rewards, and logging
     # ------------------------------------------------------------------
-    formatters = get_formatters(dataset_type, num_agents, agent_chaining=agent_chaining_enabled)
+    formatters = get_formatters(dataset_type, num_agents, agent_chaining=agent_chaining_enabled, force_aux_usage=force_aux_usage)
 
     # Load collaboration enforcement settings from config
     collaboration_cfg = (

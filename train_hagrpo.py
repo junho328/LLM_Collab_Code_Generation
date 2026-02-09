@@ -466,6 +466,7 @@ def main():
         "shuffle_agent_order": hagrpo_config.get("shuffle_agent_order", False),
         "reverse_agent_order": hagrpo_config.get("reverse_agent_order", False),
         "use_ppo_clip": hagrpo_config.get("use_ppo_clip", True),
+        "normalize_log_prob_by_length": hagrpo_config.get("normalize_log_prob_by_length", False),
     }
 
     if "top_k" in hagrpo_config:

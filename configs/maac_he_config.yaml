@@ -1,6 +1,6 @@
 # model
 model:
-  name: "Qwen/Qwen2.5-Coder-3B"
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-1.5B"
   type: "qwen"
   temperature: 0.7
   top_p: 0.9
@@ -13,7 +13,7 @@ model:
 
 # dataset
 dataset:
-  name: "openai/openai_humaneval"
+  name: "/home/work/aipr-jhna/huggingface_hub/openai_humaneval"
   type: "humaneval"
   train_split: "test[33:163]"
   eval_split: "test[:32]"
@@ -23,7 +23,7 @@ output:
   base_dir: "output"
   verbose: false
   save_final_model: false
-  save_path: "output/maac_final"
+  save_path: "/home/work/aipr-jhna/output/maac_final"
 
 # external
 external:
@@ -32,31 +32,33 @@ external:
 
 # maac
 maac:
-  num_turns: 2
+  num_turns: 1
   critic_type: "v"
-  num_train_epochs: 80
+  num_train_epochs: 6
   per_device_train_batch_size: 1
   actor_learning_rate: 5.0e-6
   critic_learning_rate: 5.0e-6
   value_loss_coef: 0.6
   rollout_buffer_size: 4
   max_new_tokens: 256
-  temperature: 0.6
-  top_p: 0.6
+  temperature: 0.7
+  top_p: 0.9
   top_k: null
   num_agents: 2
   critic_model: null
-  reward_shift: -4
+
+
+  reward_shift: 0
   discount: 0.9
   early_termination_threshold: -0.2
-  eval_interval: 40
-  eval_num_samples: 4
+  eval_interval: 4
+  eval_num_samples: 32
 
-  logging_steps: 10
+  logging_steps: 5
 # wandb
 wandb:
-  project: "comlrl"
-  entity: "OpenMLRL"
-  name: "maac_humaneval"
+  project: "HumanEval"
+  entity: "contrl"
+  name: "maac_he_qwen2.5-coder-1.5b-shift-0_v-value"
   dir: "output"
-  tags: ["maac", "humaneval", "multi-agent", "turns_2"]
+  tags: ["maac", "humaneval", "multi-agent"]

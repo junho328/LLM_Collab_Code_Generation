@@ -1,0 +1,111 @@
+# MAGRPO Configuration for BigCodeBench
+# MAGRPO: Multi-Agent Group Relative Policy Optimization
+# Uses group relative advantage instead of per-agent value networks
+
+# model
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  type: "qwen"
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 2048
+  tokenizer_kwargs:
+    trust_remote_code: true
+    padding_side: "left"
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: "bfloat16"
+  special_tokens: {}
+
+# LoRA PEFT configuration (for policy models)
+lora:
+  enabled: true  # Enable LoRA to reduce memory usage
+  r: 32  # rank of the update matrices
+  lora_alpha: 32  # scaling factor
+  lora_dropout: 0.0
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+# dataset - BigCodeBench (local JSONL file)
+dataset:
+  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/bcb_example_codes/bcb.jsonl"
+  type: "bigcodebench"
+  train_split: "0:180"
+  eval_split: "180:200"
+  shuffle_train: false
+  shuffle_eval: false
+
+seed: 42
+
+# output
+output:
+  base_dir: "/home/work/aipr-jhna/output"
+  save_final_model: false
+  verbose: false  # Enable debug output
+  log_completions: true
+  log_max_samples_per_file: 10
+
+# external
+external:
+  mode: "level_feedback"
+  sandbox_slice: 1
+
+# MAGRPO configuration
+magrpo:
+  # Training parameters
+  num_turns: 1
+  num_train_epochs: 10
+  per_device_train_batch_size: 1
+  rollout_buffer_size: 4  # Number of samples to collect before update
+  learning_rate: 2.0e-6  # Policy (LoRA) learning rate
+  eval_interval: 4
+  eval_num_samples: 20
+  num_generations: 4  # MAGRPO uses group relative advantage (multiple generations)
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  top_k: null
+  repetition_penalty: 1.1  # Penalize repetitive generation
+  num_agents: 2
+  discount: 0.9
+  joint_mode: "aligned"
+  termination_threshold: -0.2
+  
+  # Force main agent to use aux function (instead of optional)
+  force_aux_usage: true
+
+  logging_steps: 5
+  save_steps: 250
+
+# Collaboration enforcement settings
+# Prevents main function from defining its own aux function
+collaboration:
+  enforce: false  # If true, penalize main defining its own aux function
+  self_aux_penalty: 0.0  # Reward value when main defines its own aux (strong penalty)
+
+# Agent Chaining configuration
+# When enabled, Agent 2 first reasons about Agent 1's aux function, then generates main
+agent_chaining:
+  enabled: false  # Set to true to enable agent chaining mode
+  max_new_tokens_per_agent: [512, 768]  # [Agent 1 (aux), Agent 2 (reasoning + main)]
+  format_reward_weight: 0.1  # Weight for format reward (how well predicted aux matches actual)
+
+# Chat Template configuration (for Instruct models)
+# When enabled, applies chat template to prompts and extracts assistant response from completions
+chat_template:
+  enabled: false  # Set to true for Instruct models (e.g., Qwen2.5-Coder-3B-Instruct)
+  system_prompt: "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: 0
+
+# wandb
+wandb:
+  project: "BigCodeBench"
+  entity: "contrl"
+  name: "magrpo_bcb_qwen2.5-3b_shift-0_lora"
+  dir: "output"
+  tags: ["magrpo", "bigcodebench", "multi-agent", "agent-chaining", "group-relative"]

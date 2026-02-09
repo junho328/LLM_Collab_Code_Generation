@@ -1,0 +1,88 @@
+# MAAC Configuration for BigCodeBench
+# MAAC: Multi-Agent Actor-Critic
+# Uses shared critic network for value estimation
+
+# model
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  type: "qwen"
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 2048
+  tokenizer_kwargs:
+    trust_remote_code: true
+    padding_side: "left"
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: "bfloat16"
+  special_tokens: {}
+
+# dataset - BigCodeBench (local JSONL file)
+dataset:
+  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/bcb_example_codes/bcb.jsonl"
+  type: "bigcodebench"
+  train_split: "0:180"
+  eval_split: "180:200"
+  shuffle_train: false
+  shuffle_eval: false
+
+seed: 42
+
+# output
+output:
+  base_dir: "/home/work/aipr-jhna/output"
+  save_final_model: false
+  verbose: false  # Enable debug output
+  log_completions: true
+  log_max_samples_per_file: 10
+
+# external
+external:
+  mode: "level_feedback"
+  sandbox_slice: 1
+
+# MAAC configuration
+maac:
+  # Training parameters
+  num_turns: 1
+  critic_type: "q"  # "q" for Q-value, "v" for V-value
+  num_train_epochs: 10
+  per_device_train_batch_size: 1
+  actor_learning_rate: 2.0e-6
+  critic_learning_rate: 2.0e-6
+  value_loss_coef: 0.6
+  rollout_buffer_size: 4  # Number of samples to collect before update
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  top_k: null
+  num_agents: 2
+  critic_model: null  # Use same model as policy if null
+
+  # Reward processing
+  reward_shift: -2
+
+  # Training control
+  discount: 0.9
+  early_termination_threshold: -0.2
+  eval_interval: 4
+  eval_num_samples: 20
+
+  # Force main agent to use aux function (instead of optional)
+  force_aux_usage: true
+
+  logging_steps: 5
+
+# Collaboration enforcement settings
+# Prevents main function from defining its own aux function
+collaboration:
+  enforce: false  # If true, penalize main defining its own aux function
+  self_aux_penalty: 0.0  # Reward value when main defines its own aux (strong penalty)
+
+# wandb
+wandb:
+  project: "BigCodeBench"
+  entity: "contrl"
+  name: "maac_bcb_qwen2.5-3b_shift-2"
+  dir: "output"
+  tags: ["maac", "bigcodebench", "multi-agent", "actor-critic"]

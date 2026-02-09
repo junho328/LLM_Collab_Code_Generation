@@ -1,5 +1,20 @@
 import ast
+import contextlib
+import faulthandler
+import io
+import multiprocessing
+import os
+import platform
 import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import types
+import unittest
+from multiprocessing import Value, Manager
+from typing import Tuple, Dict, Any
 
 
 class TimeoutException(Exception):
@@ -168,6 +183,279 @@ def cleanup_code(code):
     return result
 
 
+# ============================================================================
+# BigCodeBench-specific cleanup and extraction functions
+# ============================================================================
+
+def cleanup_code_bigcodebench(code: str) -> str:
+    """
+    Clean up model output for BigCodeBench tasks.
+    
+    Handles cases where:
+    - Output contains markdown code blocks
+    - Output starts with function parameters (prompt ended with "def func(")
+    - Output contains explanatory text before/after code
+    """
+    if not code or not isinstance(code, str):
+        return ""
+    
+    # Step 1: Remove markdown code blocks
+    code = re.sub(r"```python\s*\n?", "", code)
+    code = re.sub(r"```\s*\n?", "", code)
+    
+    # Step 2: Remove common boilerplate phrases
+    boilerplate_patterns = [
+        r"^Here's?\s*(the|a|my)?\s*(implementation|solution|code|function).*?:\s*\n?",
+        r"^Sure[,!]?\s*(here's?|I'll).*?:\s*\n?",
+        r"^I'll\s*(write|create|implement).*?:\s*\n?",
+        r"^Let me\s*(write|create|implement).*?:\s*\n?",
+        r"^The\s+(aux|helper|main)\s+function.*?:\s*\n?",
+    ]
+    for pattern in boilerplate_patterns:
+        code = re.sub(pattern, "", code, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Step 3: Remove trailing explanations
+    # Find where actual code ends (last line with code-like content)
+    lines = code.split("\n")
+    code_end_idx = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if stripped and (
+            stripped.startswith(("def ", "return ", "if ", "for ", "while ", "class ", "#", '"""', "'''"))
+            or "=" in stripped
+            or stripped.startswith((")", "]", "}"))
+            or re.match(r"^\s+\S", lines[i])  # indented line
+        ):
+            code_end_idx = i + 1
+            break
+    
+    code = "\n".join(lines[:code_end_idx])
+    
+    return code.strip()
+
+
+def extract_aux_function_bigcodebench(raw_output: str, prompt_ended_with_def: bool = True) -> str:
+    """
+    Extract aux function from model output for BigCodeBench.
+    
+    Args:
+        raw_output: Raw model output
+        prompt_ended_with_def: If True, prompt ended with "def aux(" so output starts with params
+    
+    Returns:
+        Complete aux function definition
+    """
+    if not raw_output:
+        return ""
+    
+    cleaned = cleanup_code_bigcodebench(raw_output)
+    if not cleaned:
+        return ""
+    
+    # Case 1: Output already contains "def aux("
+    if re.search(r"def\s+aux\s*\(", cleaned):
+        return _extract_function_by_name(cleaned, "aux")
+    
+    # Case 2: Prompt ended with "def aux(" so output starts with parameters
+    if prompt_ended_with_def:
+        # Prepend "def aux(" to complete the function
+        completed = "def aux(" + cleaned
+        # Try to extract the function
+        extracted = _extract_function_by_name(completed, "aux")
+        if extracted:
+            return extracted
+        # If extraction failed, the output might just be the body
+        # Try to construct a minimal function
+        return _construct_function_from_body(cleaned, "aux")
+    
+    return ""
+
+
+def extract_main_function_bigcodebench(
+    raw_output: str, 
+    entry_point: str,
+    func_signature: str = "",
+    prompt_ended_with_signature: bool = True
+) -> str:
+    """
+    Extract main function from model output for BigCodeBench.
+    
+    Args:
+        raw_output: Raw model output
+        entry_point: Name of the main function (e.g., "task_func")
+        func_signature: Full function signature (e.g., "def task_func(x, y):")
+        prompt_ended_with_signature: If True, prompt ended with signature so output is body only
+    
+    Returns:
+        Complete main function definition
+    """
+    if not raw_output:
+        return ""
+    
+    cleaned = cleanup_code_bigcodebench(raw_output)
+    if not cleaned:
+        return ""
+    
+    # Case 1: Output already contains the function definition
+    if re.search(rf"def\s+{re.escape(entry_point)}\s*\(", cleaned):
+        return _extract_function_by_name(cleaned, entry_point)
+    
+    # Case 2: Output is just the function body
+    if prompt_ended_with_signature and func_signature:
+        # Ensure signature ends with colon
+        sig = func_signature.strip()
+        if not sig.endswith(":"):
+            sig += ":"
+        
+        # Indent the body if not already indented
+        body_lines = cleaned.split("\n")
+        indented_body = []
+        for line in body_lines:
+            if line.strip():  # Non-empty line
+                if not line.startswith(("    ", "\t")):
+                    line = "    " + line
+            indented_body.append(line)
+        
+        completed = sig + "\n" + "\n".join(indented_body)
+        return completed.strip()
+    
+    return ""
+
+
+def extract_chaining_output_bigcodebench(
+    raw_output: str,
+    entry_point: str
+) -> tuple:
+    """
+    Extract both aux and main functions from chaining mode output for BigCodeBench.
+    
+    In chaining mode, Agent 2 outputs both the predicted aux function and the main function.
+    
+    Args:
+        raw_output: Raw model output containing both functions
+        entry_point: Name of the main function
+    
+    Returns:
+        Tuple of (predicted_aux_code, main_code)
+    """
+    if not raw_output:
+        return "", ""
+    
+    # Prompt ended with "def aux(" so prepend it
+    cleaned = "def aux(" + cleanup_code_bigcodebench(raw_output)
+    
+    # Extract aux function
+    aux_code = _extract_function_by_name(cleaned, "aux")
+    
+    # Extract main function
+    main_code = _extract_function_by_name(cleaned, entry_point)
+    
+    return aux_code, main_code
+
+
+def _extract_function_by_name(code: str, function_name: str) -> str:
+    """
+    Extract a complete function definition by name from code.
+    More robust than extract_specific_function for BigCodeBench.
+    """
+    if not code or not function_name:
+        return ""
+    
+    lines = code.split("\n")
+    function_lines = []
+    in_function = False
+    base_indent = 0
+    paren_depth = 0
+    in_signature = False
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # Check for function start
+        match = re.match(rf"^(\s*)def\s+{re.escape(function_name)}\s*\(", line)
+        if match and not in_function:
+            in_function = True
+            in_signature = True
+            base_indent = len(match.group(1))
+            function_lines = [line]
+            
+            # Count parentheses to handle multi-line signatures
+            paren_depth = line.count("(") - line.count(")")
+            if paren_depth == 0 and ":" in line:
+                in_signature = False
+            
+            i += 1
+            continue
+        
+        if in_function:
+            if in_signature:
+                # Continue collecting signature lines
+                function_lines.append(line)
+                paren_depth += line.count("(") - line.count(")")
+                if paren_depth <= 0 and ":" in line:
+                    in_signature = False
+            else:
+                # Check if still in function body
+                current_indent = len(line) - len(line.lstrip()) if stripped else base_indent + 4
+                
+                if stripped == "":
+                    # Empty line - include if we have content after
+                    function_lines.append(line)
+                elif current_indent > base_indent:
+                    # Indented content - part of function
+                    function_lines.append(line)
+                elif stripped.startswith(("#", '"""', "'''")):
+                    # Comment or docstring at function level
+                    function_lines.append(line)
+                else:
+                    # Back to base indent or new definition - end of function
+                    break
+        
+        i += 1
+    
+    # Remove trailing empty lines
+    while function_lines and not function_lines[-1].strip():
+        function_lines.pop()
+    
+    result = "\n".join(function_lines)
+    
+    # Validate we got a complete function
+    if not re.search(rf"def\s+{re.escape(function_name)}\s*\(", result):
+        return ""
+    
+    return result
+
+
+def _construct_function_from_body(body: str, function_name: str) -> str:
+    """
+    Construct a function from just the body when we can't parse it properly.
+    Used as a fallback when the model output is malformed.
+    """
+    if not body:
+        return ""
+    
+    lines = body.split("\n")
+    
+    # Try to find if there's a return statement to infer it's function body
+    has_return = any("return " in line for line in lines)
+    
+    if not has_return:
+        return ""
+    
+    # Indent body if needed
+    indented_lines = []
+    for line in lines:
+        if line.strip():
+            if not line.startswith(("    ", "\t")):
+                line = "    " + line
+        indented_lines.append(line)
+    
+    # Create minimal function
+    return f"def {function_name}():\n" + "\n".join(indented_lines)
+
+
 def extract_specific_function(code, function_name):
     """
     Extract a specific function by name from the code.
@@ -212,13 +500,30 @@ def check_function_definition(code, function_name, description):
     if not func_code:
         return False, f"{description} not defined"
 
-    # Check if function has return statement
-    has_return = re.search(r"return\s+", func_code) is not None
+    # Remove docstrings before checking for return statement
+    # This prevents matching "return" in docstring text like "return string representation"
+    func_code_no_docstring = _remove_docstrings(func_code)
+    
+    # Check if function has return statement (outside of docstrings)
+    has_return = re.search(r"return\s+", func_code_no_docstring) is not None
 
     if not has_return:
         return False, f"{description} missing return statement"
 
     return True, f"{description} properly defined with return statement"
+
+
+def _remove_docstrings(code):
+    """Remove docstrings from code to avoid false positives in return statement detection."""
+    if not code:
+        return code
+    
+    # Remove triple-quoted strings (docstrings)
+    # Handle both """ and ''' styles
+    result = re.sub(r'"""[\s\S]*?"""', '', code)
+    result = re.sub(r"'''[\s\S]*?'''", '', result)
+    
+    return result
 
 
 def check_syntax(code, description):
@@ -746,3 +1051,670 @@ def check_collaboration_violation(main_code, aux_function_name="aux"):
         return False, f"Main function does not use '{aux_function_name}' function", details
 
     return False, "Collaboration pattern is correct: main uses external aux function", details
+
+
+def extract_function_signature_from_prompt(prompt, entry_point):
+    """
+    Extract the function signature (name and parameters) from a prompt.
+    
+    Looks for function definition patterns like:
+    - def entry_point(param1, param2, ...):
+    - def entry_point(param1: type, param2: type) -> return_type:
+    
+    Args:
+        prompt: The prompt text containing the function definition
+        entry_point: The name of the function to find
+    
+    Returns:
+        Tuple[str, str]: (function_name, params_string)
+            - function_name: The extracted function name (should match entry_point)
+            - params_string: The parameters as a string (e.g., "x, n: int")
+            Returns (None, None) if not found.
+    """
+    if not prompt or not entry_point:
+        return None, None
+    
+    # Pattern to match function definition with the given entry_point
+    # Handles type hints and return type annotations
+    pattern = rf"def\s+({re.escape(entry_point)})\s*\(([^)]*)\)"
+    
+    match = re.search(pattern, prompt)
+    if match:
+        func_name = match.group(1)
+        params_str = match.group(2).strip()
+        return func_name, params_str
+    
+    return None, None
+
+
+def prepend_function_def(code, func_name, params=""):
+    """
+    Prepend function definition if the code doesn't start with 'def func_name'.
+    
+    This handles cases where the model generates just the function body
+    without the 'def' statement, since training prompts may end with the
+    function signature.
+    
+    Args:
+        code: The generated code (may or may not start with 'def')
+        func_name: The expected function name
+        params: The function parameters string (e.g., "x, n: int")
+    
+    Returns:
+        str: Code with function definition prepended if necessary
+    """
+    if not code or not isinstance(code, str):
+        return code
+    
+    code = code.strip()
+    
+    # Check if code already starts with a function definition
+    # Pattern matches: def func_name( or def func_name (
+    def_pattern = rf"^\s*def\s+{re.escape(func_name)}\s*\("
+    if re.match(def_pattern, code):
+        # Already has the function definition
+        return code
+    
+    # Check if code starts with any function definition
+    any_def_pattern = r"^\s*def\s+\w+\s*\("
+    if re.match(any_def_pattern, code):
+        # Has a different function definition, return as-is
+        return code
+    
+    # Check if the target function definition exists anywhere in the code
+    # This handles cases where model generates extra text before the function
+    func_def_in_code = re.search(rf"def\s+{re.escape(func_name)}\s*\(", code)
+    if func_def_in_code:
+        # Extract from the function definition onwards
+        code = code[func_def_in_code.start():]
+        return code
+    
+    # Check if code contains <predicted_aux> tags (agent chaining format)
+    # In this case, don't wrap it - let extraction handle it
+    if "<predicted_aux>" in code or "</predicted_aux>" in code:
+        return code
+    
+    # Check if code starts with natural language (not valid Python)
+    # Don't wrap natural language text as it will break parsing
+    first_line = code.split('\n')[0].strip() if code else ""
+    if first_line and not _is_likely_python_code(first_line):
+        # Try to find any 'def func_name' in the code and extract from there
+        any_func_match = re.search(rf"def\s+\w+\s*\(", code)
+        if any_func_match:
+            code = code[any_func_match.start():]
+            return code
+        # No function found, return as-is (don't wrap non-code)
+        return code
+    
+    # Code doesn't start with a function definition, prepend it
+    # Build the function signature
+    if params:
+        func_def = f"def {func_name}({params}):\n"
+    else:
+        func_def = f"def {func_name}():\n"
+    
+    # Indent the code body if it's not already indented
+    lines = code.split("\n")
+    indented_lines = []
+    for line in lines:
+        if line.strip():  # Non-empty line
+            if not line.startswith("    ") and not line.startswith("\t"):
+                line = "    " + line
+        indented_lines.append(line)
+    
+    indented_code = "\n".join(indented_lines)
+    
+    return func_def + indented_code
+
+
+def _is_likely_python_code(line: str) -> bool:
+    """
+    Check if a line looks like Python code rather than natural language.
+    
+    Returns True if the line looks like valid Python code.
+    """
+    if not line:
+        return False
+    
+    # Python keywords and patterns that indicate code
+    code_indicators = [
+        r"^\s*def\s+",       # function definition
+        r"^\s*class\s+",     # class definition
+        r"^\s*return\s*",    # return statement
+        r"^\s*import\s+",    # import statement
+        r"^\s*from\s+\w+",   # from import
+        r"^\s*if\s+",        # if statement
+        r"^\s*for\s+",       # for loop
+        r"^\s*while\s+",     # while loop
+        r"^\s*try\s*:",      # try block
+        r"^\s*except",       # except block
+        r"^\s*with\s+",      # with statement
+        r"^\s*#",            # comment
+        r"^\s*\w+\s*=",      # assignment
+        r"^\s*\w+\s*\(",     # function call
+        r"^\s*\[",           # list
+        r"^\s*\{",           # dict
+        r"^\s*\(",           # tuple/expression
+        r"^\s*'''",          # docstring
+        r'^\s*"""',          # docstring
+    ]
+    
+    for pattern in code_indicators:
+        if re.match(pattern, line):
+            return True
+    
+    # Natural language indicators
+    natural_lang_indicators = [
+        r"^[A-Z][a-z]+\s+[A-Z]?[a-z]+",  # "Predicted Aux Function"
+        r"^Here\s+is",
+        r"^This\s+",
+        r"^The\s+",
+        r"^Create\s+",
+        r"^Write\s+",
+        r"^Implement\s+",
+        r"^Function\s*:",
+        r"^Output\s*:",
+    ]
+    
+    for pattern in natural_lang_indicators:
+        if re.match(pattern, line, re.IGNORECASE):
+            return False
+    
+    return True  # Default to assuming it's code
+
+
+# =============================================================================
+# BigCodeBench Sandboxing Utilities (adapted from official BigCodeBench code)
+# =============================================================================
+
+TIMEOUT_LIMIT = 10.0  # Shorter timeout for training (vs 240 in official)
+
+# Status codes
+_SUCCESS = 0
+_FAILED = 1
+_TIMEOUT = 2
+_UNKNOWN = 3
+
+PASS = "pass"
+FAIL = "fail"
+TIMEOUT = "timeout"
+
+_mapping = {_SUCCESS: PASS, _FAILED: FAIL, _TIMEOUT: TIMEOUT, _UNKNOWN: None}
+
+
+@contextlib.contextmanager
+def swallow_subprocess_output():
+    """Context manager to swallow stdout and stderr for subprocesses."""
+    original_popen = subprocess.Popen
+    original_run = subprocess.run
+
+    def _popen_patch(*args, **kwargs):
+        if 'capture_output' in kwargs and kwargs['capture_output']:
+            kwargs.pop('stdout', None)
+            kwargs.pop('stderr', None)
+        else:
+            kwargs.setdefault('stdout', subprocess.PIPE)
+            kwargs.setdefault('stderr', subprocess.PIPE)
+        return original_popen(*args, **kwargs)
+
+    def _run_patch(*args, **kwargs):
+        if 'capture_output' in kwargs and kwargs['capture_output']:
+            kwargs.pop('stdout', None)
+            kwargs.pop('stderr', None)
+        else:
+            kwargs.setdefault('stdout', subprocess.PIPE)
+            kwargs.setdefault('stderr', subprocess.PIPE)
+        return original_run(*args, **kwargs)
+
+    subprocess.Popen = _popen_patch
+    subprocess.run = _run_patch
+    try:
+        yield
+    finally:
+        subprocess.Popen = original_popen
+        subprocess.run = original_run
+
+
+class WriteOnlyStringIO(io.StringIO):
+    """StringIO that throws an exception when it's read from."""
+
+    def read(self, *args, **kwargs):
+        raise IOError
+
+    def readline(self, *args, **kwargs):
+        raise IOError
+
+    def readlines(self, *args, **kwargs):
+        raise IOError
+
+    def readable(self, *args, **kwargs):
+        return False
+
+
+class redirect_stdin(contextlib._RedirectStream):
+    _stream = "stdin"
+
+
+@contextlib.contextmanager
+def swallow_io():
+    """Capture and suppress all I/O."""
+    stream = WriteOnlyStringIO()
+    with contextlib.redirect_stdout(stream):
+        with contextlib.redirect_stderr(stream):
+            with redirect_stdin(stream):
+                with swallow_subprocess_output():
+                    yield
+
+
+@contextlib.contextmanager
+def time_limit(seconds: float):
+    """Context manager for setting a time limit."""
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    signal.signal(signal.SIGALRM, signal_handler)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
+
+@contextlib.contextmanager
+def chdir(root):
+    """Context manager to change directory temporarily."""
+    if root == ".":
+        yield
+        return
+    cwd = os.getcwd()
+    os.chdir(root)
+    try:
+        yield
+    except BaseException as exc:
+        raise exc
+    finally:
+        os.chdir(cwd)
+
+
+@contextlib.contextmanager
+def create_tempdir():
+    """Create and use a temporary directory."""
+    with tempfile.TemporaryDirectory() as dirname:
+        with chdir(dirname):
+            yield dirname
+
+
+@contextlib.contextmanager
+def safe_environment():
+    """Create a safe execution environment by intercepting dangerous system calls."""
+    # Save original functions
+    original_kill = os.kill
+    original_killpg = os.killpg
+    original_system = os.system
+    original_subprocess_call = subprocess.call
+    original_subprocess_check_output = subprocess.check_output
+    original_subprocess_run = subprocess.run
+    original_subprocess_popen = subprocess.Popen
+    original_os_popen = os.popen
+    original_os_execv = os.execv
+    original_os_execvp = os.execvp
+    original_os_execvpe = os.execvpe
+
+    current_pid = os.getpid()
+    current_pgid = os.getpgid(current_pid)
+    manager = multiprocessing.Manager()
+    child_pids = manager.list()
+
+    def safe_kill(pid, sig):
+        try:
+            if pid == current_pid or pid in child_pids:
+                original_kill(pid, sig)
+        except ProcessLookupError:
+            pass
+
+    def safe_killpg(pgid, sig):
+        if pgid == current_pgid or pgid in {os.getpgid(pid) for pid in child_pids}:
+            original_killpg(pgid, sig)
+
+    def safe_system(command):
+        if 'kill' in command or 'killall' in command:
+            return 0
+        return original_system(command)
+
+    def safe_subprocess_call(command, *args, **kwargs):
+        if 'kill' in str(command) or 'killall' in str(command):
+            return 0
+        return original_subprocess_call(command, *args, **kwargs)
+
+    def safe_subprocess_check_output(command, *args, **kwargs):
+        if 'ps' in str(command):
+            return b""
+        return original_subprocess_check_output(command, *args, **kwargs)
+
+    def safe_subprocess_run(*args, **kwargs):
+        if args and ('kill' in str(args[0]) or 'killall' in str(args[0])):
+            return subprocess.CompletedProcess(args, 0, b'', b'')
+        return original_subprocess_run(*args, **kwargs)
+
+    class SafePopen(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            kwargs['preexec_fn'] = os.setsid
+            super().__init__(*args, **kwargs)
+            child_pids.append(self.pid)
+
+        def communicate(self, *args, **kwargs):
+            try:
+                return super().communicate(*args, **kwargs)
+            except subprocess.TimeoutExpired:
+                return None, None
+
+        def kill(self):
+            safe_kill(self.pid, signal.SIGTERM)
+
+        def terminate(self):
+            safe_kill(self.pid, signal.SIGTERM)
+
+    def safe_os_popen(command):
+        if 'kill' in command or 'killall' in command:
+            return os.popen('echo Intercepted')
+        return original_os_popen(command)
+
+    def safe_exec(*args, **kwargs):
+        pass  # Block exec calls
+
+    # Override risky functions
+    os.kill = safe_kill
+    os.killpg = safe_killpg
+    os.system = safe_system
+    subprocess.call = safe_subprocess_call
+    subprocess.check_output = safe_subprocess_check_output
+    subprocess.run = safe_subprocess_run
+    subprocess.Popen = SafePopen
+    os.popen = safe_os_popen
+    os.execv = safe_exec
+    os.execvp = safe_exec
+    os.execvpe = safe_exec
+
+    try:
+        yield
+    finally:
+        # Cleanup child processes
+        for pid in child_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                for _ in range(10):
+                    time.sleep(0.1)
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                else:
+                    os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, Exception):
+                pass
+
+        # Restore original functions
+        os.kill = original_kill
+        os.killpg = original_killpg
+        os.system = original_system
+        subprocess.call = original_subprocess_call
+        subprocess.check_output = original_subprocess_check_output
+        subprocess.run = original_subprocess_run
+        subprocess.Popen = original_subprocess_popen
+        os.popen = original_os_popen
+        os.execv = original_os_execv
+        os.execvp = original_os_execvp
+        os.execvpe = original_os_execvpe
+
+
+def reliability_guard(max_as_limit=30*1024, max_data_limit=30*1024, max_stack_limit=10):
+    """
+    Set resource limits to prevent destructive operations.
+    WARNING: This is NOT a security sandbox.
+    """
+    os.environ['TZ'] = 'UTC'
+    try:
+        time.tzset()
+    except Exception:
+        pass
+    
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3"
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
+
+    if max_as_limit and max_data_limit and max_stack_limit:
+        try:
+            import resource
+            
+            max_as_limit_bytes = max_as_limit * 1024 * 1024
+            max_data_limit_bytes = max_data_limit * 1024 * 1024
+            max_stack_limit_bytes = max_stack_limit * 1024 * 1024
+
+            resource.setrlimit(resource.RLIMIT_AS, (max_as_limit_bytes, max_as_limit_bytes))
+            resource.setrlimit(resource.RLIMIT_DATA, (max_data_limit_bytes, max_data_limit_bytes))
+            if platform.uname().system != "Darwin":
+                resource.setrlimit(resource.RLIMIT_STACK, (max_stack_limit_bytes, max_stack_limit_bytes))
+        except Exception:
+            pass  # Resource limits may not be available on all systems
+
+    faulthandler.disable()
+
+    import builtins
+    builtins.exit = None
+    builtins.quit = None
+
+    # Close matplotlib figures if available
+    try:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+    except ImportError:
+        pass
+
+
+def unsafe_execute_bigcodebench(
+    entry_point: str,
+    code: str,
+    test_code: str,
+    timeout: float,
+    max_as_limit: float,
+    max_data_limit: float,
+    max_stack_limit: float,
+    stat,  # Value
+    details,  # Manager dict
+):
+    """
+    Execute code in a sandboxed environment.
+    This function runs in a separate process.
+    """
+    with safe_environment(), create_tempdir():
+        import os
+        import shutil
+        import builtins
+
+        rmtree = shutil.rmtree
+        rmdir = os.rmdir
+        chdir_func = os.chdir
+
+        reliability_guard(max_as_limit, max_data_limit, max_stack_limit)
+
+        module_name = "__test__"
+        new_module = types.ModuleType(module_name)
+        new_module.__dict__.update({
+            '__builtins__': builtins,
+            '__file__': f"{module_name}.py",
+            '__package__': None,
+            '__doc__': None,
+            'sys': sys,
+            'os': os,
+            'environ': os.environ,
+        })
+
+        try:
+            full_code = code + "\n" + test_code
+
+            with swallow_io():
+                exec(compile(full_code, f"{module_name}.py", 'exec'), new_module.__dict__)
+                sys.modules[module_name] = new_module
+                TestCases = getattr(new_module, 'TestCases')
+                loader = unittest.TestLoader()
+                suite = loader.loadTestsFromTestCase(TestCases)
+                test_result = unittest.TestResult()
+                with time_limit(timeout):
+                    suite.run(test_result)
+
+            issues = test_result.failures + test_result.errors
+            for test, trace in issues:
+                test_name = test.id().split(".")[-1]
+                details[test_name] = trace[:2000]  # Limit trace length (increased for debugging)
+            
+            details["_total"] = test_result.testsRun
+            details["_passed"] = test_result.testsRun - len(test_result.failures) - len(test_result.errors)
+            stat.value = _SUCCESS
+
+        except TimeoutException:
+            details["ALL"] = "Timeout"
+            stat.value = _TIMEOUT
+        except ImportError as e:
+            details["ALL"] = f"ImportError: {str(e)[:1000]}"
+            stat.value = _FAILED
+        except BaseException as e:
+            details["ALL"] = str(e)[:2000]
+            stat.value = _FAILED
+
+        # Restore for cleanup
+        shutil.rmtree = rmtree
+        os.rmdir = rmdir
+        os.chdir = chdir_func
+
+
+def untrusted_check_bigcodebench(
+    code: str,
+    test_code: str,
+    entry_point: str,
+    timeout: float = 5.0,
+    max_as_limit: float = 30*1024,
+    max_data_limit: float = 30*1024,
+    max_stack_limit: float = 10,
+) -> Tuple[str, Dict[str, Any], int, int]:
+    """
+    Run BigCodeBench tests in an isolated process with sandboxing.
+    
+    Returns:
+        Tuple of (status, details_dict, passed_tests, total_tests)
+    """
+    timeout = max(timeout, 1.0)
+    
+    # Shared memory objects
+    stat = Value("i", _UNKNOWN)
+    manager = Manager()
+    details = manager.dict()
+
+    p = multiprocessing.Process(
+        target=unsafe_execute_bigcodebench,
+        args=(
+            entry_point,
+            code,
+            test_code,
+            timeout,
+            max_as_limit,
+            max_data_limit,
+            max_stack_limit,
+            stat,
+            details,
+        ),
+    )
+    p.start()
+    p.join(timeout=timeout + 1)
+    
+    if p.is_alive():
+        p.terminate()
+        time.sleep(0.1)
+    if p.is_alive():
+        p.kill()
+        time.sleep(0.1)
+
+    status = _mapping[stat.value]
+    details_dict = dict(details)
+
+    if not status:
+        status = TIMEOUT
+
+    if status == PASS and details_dict:
+        # Check if there were any failures in details
+        if any(k not in ("_total", "_passed") for k in details_dict if not k.startswith("_")):
+            status = FAIL
+
+    passed = details_dict.get("_passed", 0)
+    total = details_dict.get("_total", 1)
+
+    return status, details_dict, passed, total
+
+
+def run_bigcodebench_tests(combined_code, test_code, entry_point, timeout=5):
+    """
+    Run BigCodeBench unittest-based tests on the combined code.
+    Uses multiprocessing-based sandboxing for isolation.
+    
+    Args:
+        combined_code: The aux + main function code
+        test_code: The unittest test code from BigCodeBench
+        entry_point: The function name being tested
+        timeout: Timeout in seconds (default 5s for training speed)
+        
+    Returns:
+        tuple: (passed_tests, total_tests, error_message)
+    """
+    # Use the sandboxed execution
+    status, details, passed, total = untrusted_check_bigcodebench(
+        code=combined_code,
+        test_code=test_code,
+        entry_point=entry_point,
+        timeout=timeout,
+    )
+    
+    # Build error message from details
+    error_msg = None
+    if status != PASS:
+        error_parts = []
+        for key, value in details.items():
+            if not key.startswith("_"):  # Skip internal keys
+                error_parts.append(f"{key}: {value[:500]}")
+        error_msg = "\n".join(error_parts[:5]) if error_parts else status
+    
+    return passed, total, error_msg
+
+
+def extract_imports_from_code_prompt(code_prompt):
+    """
+    Extract import statements AND constant definitions from BigCodeBench code_prompt.
+    The code_prompt contains imports, constants, and function signature.
+    
+    This extracts everything before the main function definition, including:
+    - import statements
+    - from ... import statements
+    - constant definitions (e.g., TARGET_JSON_FILE = 'downloaded.json')
+    """
+    if not code_prompt:
+        return ""
+    
+    preamble_lines = []
+    lines = code_prompt.split("\n")
+    
+    for line in lines:
+        stripped = line.strip()
+        # Stop at the main function definition
+        if stripped.startswith("def "):
+            break
+        # Include import statements
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            preamble_lines.append(line)
+        # Include constant definitions (UPPER_CASE = value pattern)
+        elif re.match(r'^[A-Z_][A-Z0-9_]*\s*=', stripped):
+            preamble_lines.append(line)
+        # Include other assignments that might be needed (e.g., lowercase constants)
+        elif '=' in stripped and not stripped.startswith('#') and not stripped.startswith('def '):
+            # Only include simple assignments at module level (not indented)
+            if not line.startswith(' ') and not line.startswith('\t'):
+                preamble_lines.append(line)
+    
+    return "\n".join(preamble_lines)

@@ -64,8 +64,9 @@ hagrpo:
   m_clip_min: 0.1
   m_clip_max: 1.0
   shuffle_agent_order: false
-  reverse_agent_order: false  # true: Main -> Helper, false: Helper -> Main
+  reverse_agent_order: true  # true: Main -> Helper, false: Helper -> Main
   use_ppo_clip: false  # false: use simple policy gradient (MAGRPO-style), M factor still applied
+  normalize_log_prob_by_length: false  # true: use mean log prob (length-invariant), false: use sum (default)
 
   logging_steps: 5
   save_steps: 200
@@ -78,12 +79,12 @@ reward_processor:
 # Collaboration enforcement settings
 # Prevents main function from defining its own aux function
 collaboration:
-  enforce: true  # If true, penalize main defining its own aux function
+  enforce: false  # If true, penalize main defining its own aux function
   self_aux_penalty: 0.0  # Reward value when main defines its own aux (strong penalty)
 # wandb
 wandb:
   project: "HumanEval"
   entity: "contrl"
-  name: "hagrpo_he_qwen2.5-coder-1.5b-shift-2-eps0.0-mclip1.0-coop_penalty0.0-must_call_aux-full"
+  name: "hagrpo_he_qwen2.5-coder-1.5b-shift-2-reverse"
   dir: "output"
   tags: ["magrpo", "humaneval", "multi-agent"]

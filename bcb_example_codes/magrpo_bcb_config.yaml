@@ -1,0 +1,91 @@
+# export TMPDIR=/home/work/tmp
+# mkdir -p /home/work/tmp
+# export MPLBACKEND=Agg
+
+# model
+model:
+  name: "/home/work/aipr-jhna/huggingface_hub/Qwen2.5-Coder-3B"
+  type: "qwen"
+  temperature: 0.7
+  top_p: 0.9
+  max_length: 4096
+  tokenizer_kwargs:
+    trust_remote_code: true
+    padding_side: "left"
+  model_kwargs:
+    trust_remote_code: true
+    torch_dtype: "bfloat16"
+  special_tokens: {}
+
+# dataset - BigCodeBench (local JSON file)
+dataset:
+  name: "/home/work/aipr-jhna/LLM_Collab_Code_Generation/data/bcb.jsonl"
+  type: "bigcodebench"
+  train_split: "0:180"
+  eval_split: "180:200"
+  shuffle_train: true
+  shuffle_eval: false
+
+# LoRA configuration
+use_lora: false
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.0
+lora_target_modules: all-linear  # Auto-detect based on model architecture
+lora_path: null
+
+seed: 42
+
+# output
+output:
+  base_dir: "/workspace/output/magrpo_bcb"
+  save_final_model: false
+  verbose: false
+  log_completions: true
+  log_max_samples_per_file: 10
+
+# external
+external:
+  mode: "level_feedback"
+  sandbox_slice: 1
+
+# magrpo
+magrpo:
+  num_turns: 1
+  num_train_epochs: 6
+  per_device_train_batch_size: 1
+  rollout_buffer_size: 4
+  learning_rate: 2.0e-5
+  eval_interval: 4
+  eval_num_samples: 20
+  num_generations: 4
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  top_k: null
+  repetition_penalty: 1.1  # Penalize repetitive generation
+  joint_mode: aligned
+  num_agents: 2
+  logging_steps: 5
+  save_steps: 250
+  # Parallel reward computation
+  parallel_reward: true
+  max_reward_workers: 8
+  reward_parallel_backend: process  # 'process' for true parallelism, 'thread' for GIL-limited
+  # Force main agent to use aux function (instead of optional)
+  force_aux_usage: false
+  # Multi-GPU distributed training (required for torchrun)
+  use_distributed: false
+
+reward_processor:
+  enabled: true
+  scale_factor: 1.0
+  shift: -4
+
+# wandb
+wandb:
+  project: "BigCodeBench"
+  entity: "contrl"
+  name: "magrpo_bcb_qwen2.5-3b_shift-4_full"
+  dir: "output"
+  tags: ["magrpo", "bigcodebench", "multi-agent"]
